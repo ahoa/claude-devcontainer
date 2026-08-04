@@ -25,7 +25,6 @@ Straight from GitHub, nothing to check out. Run it in the project you want the
 devcontainer in:
 
 ```sh
-cd /path/to/your/project
 curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh | bash
 ```
 
