@@ -21,8 +21,31 @@ Running `install.sh` writes these into your project's `.devcontainer/`:
 
 ## Install
 
+Straight from GitHub, nothing to check out. Run it in the project you want the
+devcontainer in:
+
 ```sh
-./install.sh /path/to/your/project      # or run it from inside the project
+cd /path/to/your/project
+curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh | bash
+```
+
+Give it a target directory to install somewhere other than the current one:
+
+```sh
+curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh \
+  | bash -s -- /path/to/your/project
+```
+
+When `install.sh` finds no `template/` next to itself it downloads one into a
+temp dir and removes it afterwards. Prompts are read from your terminal rather
+than stdin, so the interactive flow works through the pipe. ([Read the script
+first](install.sh) if you'd rather not pipe an unread one into your shell.)
+
+Or from a clone you already have — here the target directory is worth naming,
+since the current one is the clone itself:
+
+```sh
+./install.sh /path/to/your/project
 ```
 
 It asks two things:
@@ -34,9 +57,12 @@ It asks two things:
    `--force`).
 2. **How many tmux windows** — each window runs its own Claude. Default `1`.
 
-Non-interactive:
+Non-interactive — pass the answers as flags, either form:
 
 ```sh
+curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh \
+  | bash -s -- --name myapp --windows 2
+
 ./install.sh --name myapp --windows 2 /path/to/your/project
 ```
 
@@ -45,6 +71,11 @@ Non-interactive:
 | `--name NAME` | Project name (skips the prompt). |
 | `--windows N` | Number of tmux windows (default `1`). |
 | `--force` | Overwrite an existing `.devcontainer/` and reuse conflicting Docker objects. |
+
+| Env var | Meaning |
+|---------|---------|
+| `CLAUDE_DEVCONTAINER_REF` | Branch, tag or commit to pull the template from (default `main`). |
+| `CLAUDE_DEVCONTAINER_REPO` | Repo to pull it from, e.g. your own fork. |
 
 ## After installing
 
@@ -78,6 +109,7 @@ window count for a single run.
 ## Requirements
 
 - Docker (with Compose v2)
+- `bash`, plus `curl` and `tar` when installing without a checkout
 - Node.js / `npm` on the host — `start.sh` installs the `@devcontainers/cli`
   locally into the project on first run.
 
