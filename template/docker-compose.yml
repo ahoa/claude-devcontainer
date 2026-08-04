@@ -1,0 +1,30 @@
+name: __PROJECT_NAME__
+services:
+  devcontainer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    sysctls:
+      # Required so init-firewall.sh can DNAT localhost:PORT to service containers.
+      - net.ipv4.conf.all.route_localnet=1
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ..:/workspace:cached
+      # Persists an SSH/deploy key across container rebuilds.
+      - ssh:/home/dev/.ssh
+      # Persists Claude's login token + global config across rebuilds. start.sh
+      # passes --remove-existing-container on build-input changes, which wipes the
+      # container fs; without this volume every rebuild forces a fresh /login.
+      # CLAUDE_CONFIG_DIR (set in the Dockerfile) points all of Claude's state
+      # — .credentials.json AND .claude.json — into this directory.
+      - claude:/home/dev/.claude
+      # Host Docker daemon socket (docker-outside-of-docker) — lets this container
+      # drive the host daemon. Remove this line if the container needs no Docker.
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: sleep infinity
+
+volumes:
+  ssh:
+  claude:

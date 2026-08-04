@@ -1,0 +1,19 @@
+{
+  "features": {
+    "ghcr.io/aivar-codeborne/devcontainer-features/claude:1.0.7": {
+      "version": "1.0.7",
+      "resolved": "ghcr.io/aivar-codeborne/devcontainer-features/claude@sha256:39c341da7a492a31bbb0f12b31e55b05a07f2d29440d4796a412cdb9b93a6ee2",
+      "integrity": "sha256:39c341da7a492a31bbb0f12b31e55b05a07f2d29440d4796a412cdb9b93a6ee2"
+    },
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "version": "2.5.9",
+      "resolved": "ghcr.io/devcontainers/features/common-utils@sha256:cb0c4d3c276f157eed17935747e364178d75fee17f55c4e129966f64633deb3a",
+      "integrity": "sha256:cb0c4d3c276f157eed17935747e364178d75fee17f55c4e129966f64633deb3a"
+    },
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+      "version": "1.10.0",
+      "resolved": "ghcr.io/devcontainers/features/docker-outside-of-docker@sha256:c2c2cf829505ead8e4892c88c31b6594ae94a2bbb209e16e1fac456c1a3a624e",
+      "integrity": "sha256:c2c2cf829505ead8e4892c88c31b6594ae94a2bbb209e16e1fac456c1a3a624e"
+    }
+  }
+}

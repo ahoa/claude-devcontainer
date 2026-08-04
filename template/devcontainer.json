@@ -1,0 +1,19 @@
+{
+  "name": "__PROJECT_NAME__",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "devcontainer",
+  "workspaceFolder": "/workspace",
+  "shutdownAction": "stopCompose",
+  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {},
+    "ghcr.io/aivar-codeborne/devcontainer-features/claude:1.0.7": {},
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+      "moby": false
+    }
+  },
+  "overrideFeatureInstallOrder": [
+    "ghcr.io/devcontainers/features/common-utils:2"
+  ],
+  "remoteUser": "dev"
+}
