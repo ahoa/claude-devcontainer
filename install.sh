@@ -190,6 +190,33 @@ list_conflicts() {
     [[ $found -eq 1 ]]
 }
 
+# Migrate a pre-shared-login install: older versions of this template gave
+# every project its own <project>_claude volume (and thus its own /login).
+# When such a volume exists, seed the shared claude-shared volume from it so
+# the login carries over — unless claude-shared already holds a login (another
+# project migrated first; one login already covers every project). The old
+# volume is left in place for the user to remove once the new setup works.
+migrate_claude_volume() {
+    local old="${PROJECT_NAME}_claude"
+    docker_available || return 0
+    docker volume ls --format '{{.Name}}' 2>/dev/null | grep -qx "$old" || return 0
+
+    if docker volume ls --format '{{.Name}}' 2>/dev/null | grep -qx "claude-shared" \
+       && docker run --rm -v claude-shared:/v alpine test -f /v/.credentials.json 2>/dev/null; then
+        echo "Note: 'claude-shared' already holds a Claude login — leaving old volume '$old' untouched."
+        return 0
+    fi
+
+    echo "Migrating Claude login/config from '$old' into shared volume 'claude-shared'…"
+    docker volume create claude-shared >/dev/null
+    if docker run --rm -v "$old":/from -v claude-shared:/to alpine cp -a /from/. /to; then
+        echo "Migrated. Once the new setup works, remove the old volume with: docker volume rm $old"
+    else
+        echo "WARNING: copy failed — 'claude-shared' may be incomplete. Re-run the installer to retry, or copy manually:" >&2
+        echo "  docker run --rm -v $old:/from -v claude-shared:/to alpine cp -a /from/. /to" >&2
+    fi
+}
+
 # ── Resolve the project name (validate + conflict-check, re-prompt as needed) ─
 if ! docker_available; then
     echo "Note: Docker daemon not reachable — skipping conflict checks (name format still validated)." >&2
@@ -270,6 +297,10 @@ done
 if [[ ! -f "$DEST/.gitignore" ]]; then
     printf '.build-hash\n' > "$DEST/.gitignore"
 fi
+
+# Carry an old per-project Claude login over to the shared volume (no-op on
+# fresh installs and when the shared volume is already logged in).
+migrate_claude_volume
 
 cat <<EOF
 

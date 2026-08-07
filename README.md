@@ -111,6 +111,46 @@ authenticates them all. `start.sh` creates the volume on first run; if you
 bypass `start.sh` (e.g. VS Code's "Reopen in Container"), create it once with
 `docker volume create claude-shared`.
 
+## Migrating an older install
+
+Installs made before the shared-login change gave every project its own
+`<project>_claude` volume — and therefore its own `/login`. To move an existing
+project over, re-run the installer on it with the **same project name** plus
+`--force` (required, since the compose project/image/volumes already exist):
+
+```sh
+cd /path/to/your/project
+curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh \
+  | bash -s -- --name <project> --force
+```
+
+This does three things:
+
+1. **Overwrites all template files** — including any customizations you made to
+   `Dockerfile`, `allowed-domains.conf` and `init-firewall.sh` (`OPEN_PORTS`).
+   They are in your project's git, so restore your additions afterwards with
+   `git diff` / `git add -p`.
+2. **Migrates the login**: if the old `<project>_claude` volume exists and
+   `claude-shared` does not yet hold a login, its contents (credentials, config,
+   session transcripts) are copied into `claude-shared`. If `claude-shared` is
+   already logged in — e.g. another project migrated first — nothing is copied;
+   that login already covers every project.
+3. **Leaves the old volume in place.** Once the new setup works, reclaim the
+   space with `docker volume rm <project>_claude`.
+
+Then run `./.devcontainer/start.sh` — it notices the changed build inputs, does
+a clean rebuild, and the new container mounts `claude-shared`.
+
+To migrate by hand instead: make the same edits the template got (volume
+`name: claude-shared` + `external: true` in `docker-compose.yml`, the
+`docker volume create claude-shared` line in `start.sh`) and seed the volume
+yourself:
+
+```sh
+docker volume create claude-shared
+docker run --rm -v <project>_claude:/from -v claude-shared:/to alpine cp -a /from/. /to
+```
+
 ## Requirements
 
 - Docker (with Compose v2)
