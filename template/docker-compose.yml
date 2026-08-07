@@ -14,11 +14,13 @@ services:
       - ..:/workspace:cached
       # Persists an SSH/deploy key across container rebuilds.
       - ssh:/home/dev/.ssh
-      # Persists Claude's login token + global config across rebuilds. start.sh
-      # passes --remove-existing-container on build-input changes, which wipes the
-      # container fs; without this volume every rebuild forces a fresh /login.
-      # CLAUDE_CONFIG_DIR (set in the Dockerfile) points all of Claude's state
-      # — .credentials.json AND .claude.json — into this directory.
+      # Claude's login token + global config. `claude-shared` is ONE fixed-name
+      # volume used by every project installed from this template, so a single
+      # /login authenticates all devcontainers. It also survives rebuilds:
+      # start.sh passes --remove-existing-container on build-input changes,
+      # which wipes the container fs. CLAUDE_CONFIG_DIR (set in the Dockerfile)
+      # points all of Claude's state — .credentials.json AND .claude.json —
+      # into this directory.
       - claude:/home/dev/.claude
       # Host Docker daemon socket (docker-outside-of-docker) — lets this container
       # drive the host daemon. Remove this line if the container needs no Docker.
@@ -28,3 +30,9 @@ services:
 volumes:
   ssh:
   claude:
+    # Fixed name (not <project>_claude) so all projects share one login.
+    # Declared external because compose warns when reusing a same-named volume
+    # created by another compose project; start.sh creates it up front
+    # (`docker volume create` is idempotent).
+    name: claude-shared
+    external: true

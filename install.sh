@@ -170,13 +170,12 @@ list_conflicts() {
     if docker compose ls --all 2>/dev/null | awk 'NR>1{print $1}' | grep -qx "$n"; then
         echo "  - docker compose project '$n'"; found=1
     fi
-    # The named volumes this template would create (<project>_ssh / _claude).
-    local v
-    for v in "${n}_ssh" "${n}_claude"; do
-        if docker volume ls --format '{{.Name}}' 2>/dev/null | grep -qx "$v"; then
-            echo "  - docker volume '$v'"; found=1
-        fi
-    done
+    # The named volume this template would create (<project>_ssh). The Claude
+    # login/config volume is NOT checked: it has a fixed name (claude-shared)
+    # shared across all projects, so an existing one is expected, not a conflict.
+    if docker volume ls --format '{{.Name}}' 2>/dev/null | grep -qx "${n}_ssh"; then
+        echo "  - docker volume '${n}_ssh'"; found=1
+    fi
     # The image compose derives for the devcontainer service (<project>-devcontainer).
     local img
     while IFS= read -r img; do

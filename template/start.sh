@@ -69,6 +69,11 @@ else
     echo "==> devcontainer up (build inputs unchanged — reusing existing container)"
 fi
 
+# The Claude config/login volume is shared by every project installed from this
+# template (one /login covers all devcontainers). docker-compose.yml declares it
+# external, so make sure it exists — `docker volume create` is idempotent.
+docker volume create claude-shared >/dev/null
+
 # `devcontainer up` builds the image, starts the compose stack, applies the
 # features declared in devcontainer.json, and runs the postStartCommand
 # (firewall init).

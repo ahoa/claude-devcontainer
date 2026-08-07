@@ -11,7 +11,7 @@ Running `install.sh` writes these into your project's `.devcontainer/`:
 | File | Purpose |
 |------|---------|
 | `Dockerfile` | Minimal Debian base: `git`, `zsh`, `tmux`, firewall tooling, a `dev` user, and Claude's config baked to a persisted path. **No language runtimes** — add your own. |
-| `docker-compose.yml` | The devcontainer service + two named volumes (`ssh`, `claude`) so your deploy key and Claude login survive rebuilds. |
+| `docker-compose.yml` | The devcontainer service + named volumes: `ssh` (per-project deploy key) and `claude-shared` (Claude login/config, one volume shared by **all** projects — log in once, every devcontainer is authenticated). |
 | `devcontainer.json` | Wires in the `common-utils`, Claude, and `docker-outside-of-docker` features; runs the firewall on start. |
 | `devcontainer-lock.json` | Pins the three features by digest. |
 | `init-firewall.sh` + `allowed-domains.conf` | Runtime egress firewall — default-deny outbound, allowing only GitHub, Anthropic, npm, Docker Hub, and hosts you add. |
@@ -100,10 +100,16 @@ cd /path/to/your/project
 
 `start.sh` hashes the build inputs and only forces a clean rebuild when they
 change; otherwise it reuses the existing container. The tmux session (and the
-Claude login, via the `claude` volume) persists across disconnects and
+Claude login, via the `claude-shared` volume) persists across disconnects and
 rebuilds, so you can detach, reconnect from another machine, and pick up exactly
 where you left off. Set `TMUX_WINDOWS=N` in the environment to override the
 window count for a single run.
+
+The `claude-shared` volume is global — every project installed from this
+template mounts the same one, so a single `/login` in any devcontainer
+authenticates them all. `start.sh` creates the volume on first run; if you
+bypass `start.sh` (e.g. VS Code's "Reopen in Container"), create it once with
+`docker volume create claude-shared`.
 
 ## Requirements
 
