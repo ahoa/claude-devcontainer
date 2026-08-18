@@ -55,7 +55,7 @@ The template's:
 
 | File | Purpose |
 |------|---------|
-| `.template/Dockerfile` | Minimal Debian base: `git`, `zsh`, `tmux`, firewall tooling, a `dev` user, the timezone you picked, and Claude's config baked to a persisted path. **No language runtimes** — those go in `tools.sh`. |
+| `.template/Dockerfile` | Debian base: `git`, `zsh`, `tmux`, firewall tooling, a `dev` user, the timezone you picked, Claude's config baked to a persisted path, and **Node and Java on their current LTS lines**. Anything else goes in `tools.sh`. |
 | `.template/docker-compose.yml` | The devcontainer service, plus the `claude-shared` volume (Claude login/config, one volume shared by **all** projects — log in once, every devcontainer is authenticated). |
 | `.template/init-firewall.sh` | Runtime egress firewall — default-deny outbound, allowing only what the two host lists resolve to, plus the dynamically fetched GitHub ranges. |
 | `.template/domains-base.conf` | The baseline hosts every devcontainer needs (Anthropic, npm, Docker Hub, `fm.codeborne.com`). Template-owned so updates can extend it. |
@@ -131,12 +131,12 @@ curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh \
 
 ## After installing
 
-The base image is intentionally empty of language runtimes. Customise — all three
-files survive template updates:
+The base image ships Node and Java (current LTS lines); everything else is yours to
+add. Customise — all three files survive template updates:
 
-- **Toolchain** — write plain shell into `.devcontainer/tools.sh` (Node, JDK,
-  Python, …). It runs as root at build time, where the network is unrestricted;
-  the firewall only applies at runtime.
+- **Toolchain** — write plain shell into `.devcontainer/tools.sh` for anything
+  beyond Node and Java (Python, database clients, …). It runs as root at build
+  time, where the network is unrestricted; the firewall only applies at runtime.
 - **Outbound hosts** — add domains to `.devcontainer/domains.conf` (one host per
   line). Only what your project adds: the baseline (Anthropic, npm, Docker Hub,
   `fm.codeborne.com`) lives in `.template/domains-base.conf`, and GitHub ranges are

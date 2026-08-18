@@ -82,8 +82,29 @@ RUN chmod +x /usr/local/bin/init-firewall.sh && \
     echo "dev ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh" > /etc/sudoers.d/init-firewall && \
     chmod 0440 /etc/sudoers.d/init-firewall
 
-# Project toolchain (Node, JDK, Python, …). It lives in tools.sh rather than in
-# RUN lines here, because this Dockerfile belongs to the template and is
+# ── Default language runtimes ────────────────────────────────────────────────
+# Node and Java, both on their current LTS line. They live here rather than in
+# tools.sh because every project gets them: a template update can bump the version,
+# whereas tools.sh is frozen the moment a project is installed.
+#
+# Node from NodeSource — Debian's own nodejs package trails the LTS line badly. Its
+# setup script runs apt-get update itself.
+ENV NODE_MAJOR=24
+RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nodejs \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Java from Debian, which does carry the current LTS. Headless: no AWT/Swing, which
+# saves a lot of image for a container that has no display anyway. JAVA_HOME is
+# derived from javac's real path so the architecture is not baked into it.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    openjdk-25-jdk-headless \
+    && apt-get clean && rm -rf /var/lib/apt/lists/* \
+    && ln -s "$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")" /usr/lib/jvm/current
+ENV JAVA_HOME=/usr/lib/jvm/current
+
+# Project toolchain — anything beyond Node and Java. It lives in tools.sh rather
+# than in RUN lines here, because this Dockerfile belongs to the template and is
 # overwritten on update, while tools.sh is yours and is not. Kept last so editing
 # it invalidates no earlier layer, and dropped afterwards so the image does not
 # ship the script itself.
