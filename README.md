@@ -4,9 +4,64 @@ A project-agnostic [dev container](https://containers.dev/) that runs
 [Claude Code](https://docs.claude.com/en/docs/claude-code) inside a network
 sandbox and a long-lived `tmux` session. Drop it into any repo with one command.
 
-## What you get
+The application under development is meant to run on your **host**, not in here —
+the container is where Claude reads, edits and builds the code.
 
-Running `install.sh` writes this into your project:
+## Install
+
+Run this in the project you want the devcontainer in:
+
+```sh
+curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh | bash
+```
+
+It asks for a project name (used for the Docker image, compose project and
+volumes), how many tmux windows to open, and the container's timezone. In a
+project that already has a `.devcontainer/`, every question defaults to what that
+install answered, so pressing Enter three times keeps it.
+
+Prompts are read from your terminal rather than stdin, so the interactive flow
+works through the pipe. ([Read the script first](install.sh) if you'd rather not
+pipe an unread one into your shell.) To answer up front, or to install somewhere
+other than the current directory:
+
+```sh
+./install.sh --name myapp --windows 2 --timezone UTC /path/to/your/project
+```
+
+| Flag | Meaning |
+|------|---------|
+| `--name NAME` | Project name, lowercase `[a-z0-9][a-z0-9_-]*` |
+| `--windows N` | tmux windows, each running its own Claude (default `1`) |
+| `--timezone ZONE` | IANA timezone for the container clock (default `Europe/Tallinn`) |
+| `--force` | Overwrite an existing `.devcontainer/` and reuse conflicting Docker objects |
+
+| Env var | Meaning |
+|---------|---------|
+| `CLAUDE_DEVCONTAINER_REPO` | Repo to install and update from, e.g. your own fork |
+| `CLAUDE_DEVCONTAINER_REF` | Branch, tag or commit to install (default `main`) |
+
+## Run
+
+```sh
+cd /path/to/your/project
+./.devcontainer/start.sh            # builds, starts, attaches Claude
+./.devcontainer/attach.sh           # re-attach to the live session, no rebuild
+./.devcontainer/start.sh -r         # rebuild + resume the previous Claude session
+./.devcontainer/start.sh feature-x  # run Claude on git worktree "feature-x"
+TMUX_WINDOWS=3 ./.devcontainer/start.sh   # override the window count for one run
+```
+
+`start.sh` hashes the build inputs and rebuilds only when they change. The tmux
+session and the Claude login persist across disconnects and rebuilds, so you can
+detach, reconnect from another machine, and pick up where you left off.
+
+The login lives in one `claude-shared` Docker volume that **every** project from
+this template mounts, so a single `/login` authenticates them all. `start.sh`
+creates it; if you bring the container up some other way, run
+`docker volume create claude-shared` once.
+
+## Configuration
 
 ```
 .devcontainer/
@@ -20,283 +75,89 @@ Running `install.sh` writes this into your project:
 ├── update.sh
 │
 └── .template/                   machinery — hidden, never edit
-    ├── devcontainer.json
-    ├── devcontainer-lock.json
+    ├── devcontainer.json        (+ devcontainer-lock.json)
     ├── Dockerfile
     ├── docker-compose.yml
-    ├── init-firewall.sh
+    ├── init-firewall.sh         (+ domains-base.conf)
     └── tmux.conf
 ```
 
-**The four files at the top are yours.** They are created once and never
-overwritten, so a template update cannot touch them. Below them sit the three
-commands you run. Everything else is machinery: it says `DO NOT CHANGE THIS FILE`
-at the top, is replaced on update, and lives out of sight in `.template/`.
-
-`start.sh` and `attach.sh` point the devcontainer CLI at the hidden config with
-`--config`, so `devcontainer.json` does not have to sit where the CLI would look
-for it on its own. Driving the container by hand needs that flag too:
-`devcontainer up --workspace-folder . --config .devcontainer/.template/devcontainer.json`.
-
-Yours:
-
-| File | Purpose |
-|------|---------|
-| `tools.sh` | Your project's toolchain (Node, JDK, Python, …). Plain shell, run as root at image build time with full network. |
-| `domains.conf` | Extra outbound hosts, one per line. |
-| `firewall.sh` | `iptables`/`ipset` rules the template cannot know about. Sourced at container start, before the catch-all reject. |
-| `docker-compose.override.yml` | Extra services, ports, env and volumes, merged on top of the template's compose file. |
-
-The application under development is meant to run on the **host**, not in the
-container: the container is where Claude edits and builds the code. Nothing needs
-configuring for that — reach the host at `host.docker.internal` (the firewall
-resolves and allows whatever the runtime publishes that name as), and a sibling
-compose service by its service name.
-
-The template's:
-
-| File | Purpose |
-|------|---------|
-| `.template/Dockerfile` | Debian base: `git`, `zsh`, `tmux`, firewall tooling, a `dev` user, the timezone you picked, Claude's config baked to a persisted path, and **Node and Java on their current LTS lines**. Anything else goes in `tools.sh`. |
-| `.template/docker-compose.yml` | The devcontainer service, plus the `claude-shared` volume (Claude login/config, one volume shared by **all** projects — log in once, every devcontainer is authenticated). |
-| `.template/init-firewall.sh` | Runtime egress firewall — default-deny outbound, allowing only what the two host lists resolve to, plus the dynamically fetched GitHub ranges. |
-| `.template/domains-base.conf` | The baseline hosts every devcontainer needs (Anthropic, npm, Docker Hub, `fm.codeborne.com`). Template-owned so updates can extend it. |
-| `.template/tmux.conf` | `Ctrl-a` prefix, mouse, big scrollback, truecolor, OSC 52 clipboard, vi copy mode. |
-| `.template/devcontainer.json` | Wires in the `common-utils`, Claude, and `docker-outside-of-docker` features; merges `docker-compose.override.yml`; runs the firewall on start. |
-| `.template/devcontainer-lock.json` | Pins the three features by digest. Has to sit beside `devcontainer.json`. |
-| `start.sh` | Builds/starts the container (rebuilding only when build inputs change) and attaches Claude in tmux. |
-| `attach.sh` | Fast re-attach to the running session (no rebuild). |
-| `update.sh` | Pulls a newer template into the project; `--check` reports whether one exists. |
-
-## Install
-
-Straight from GitHub, nothing to check out. Run it in the project you want the
-devcontainer in:
-
-```sh
-curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh | bash
-```
-
-Give it a target directory to install somewhere other than the current one:
-
-```sh
-curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh \
-  | bash -s -- /path/to/your/project
-```
-
-When `install.sh` finds no `template/` next to itself it downloads one into a
-temp dir and removes it afterwards. Prompts are read from your terminal rather
-than stdin, so the interactive flow works through the pipe. ([Read the script
-first](install.sh) if you'd rather not pipe an unread one into your shell.)
-
-Or from a clone you already have — here the target directory is worth naming,
-since the current one is the clone itself:
-
-```sh
-./install.sh /path/to/your/project
-```
-
-It asks three things — and on a re-run in a directory that already has a
-`.devcontainer/`, each question defaults to what that install answered, so pressing
-Enter keeps it:
-
-1. **Project name** — used for the Docker image, the compose project name, and
-   the named volumes. Must be lowercase (`[a-z0-9][a-z0-9_-]*`). The installer
-   checks Docker for an existing compose project, volume, image, or container
-   with that name and makes you pick another if it collides (override with
-   `--force`) — except when the name is the one the target directory is already
-   installed under, since then those objects are the project's own.
-2. **How many tmux windows** — each window runs its own Claude. Default `1`.
-3. **Timezone** — the container's clock, as an IANA zone name. Default
-   `Europe/Tallinn`; press Enter to accept it. Checked against the host's
-   zoneinfo database, so typos are caught before the build. Without this the
-   container would run UTC and its timestamps would disagree with your wall
-   clock.
-
-Non-interactive — pass the answers as flags, either form:
-
-```sh
-curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh \
-  | bash -s -- --name myapp --windows 2
-
-./install.sh --name myapp --windows 2 --timezone UTC /path/to/your/project
-```
-
-| Flag | Meaning |
-|------|---------|
-| `--name NAME` | Project name (skips the prompt). |
-| `--windows N` | Number of tmux windows (default `1`). |
-| `--timezone ZONE` | IANA timezone for the container clock (default `Europe/Tallinn`). |
-| `--force` | Overwrite an existing `.devcontainer/` and reuse conflicting Docker objects. |
-
-| Env var | Meaning |
-|---------|---------|
-| `CLAUDE_DEVCONTAINER_REF` | Branch, tag or commit to pull the template from (default `main`). |
-| `CLAUDE_DEVCONTAINER_REPO` | Repo to pull it from, e.g. your own fork. |
-
-## After installing
-
-The base image ships Node and Java (current LTS lines); everything else is yours to
-add. Customise — all four files survive template updates:
-
-- **Toolchain** — write plain shell into `.devcontainer/tools.sh` for anything
-  beyond Node and Java (Python, database clients, …). It runs as root at build
-  time, where the network is unrestricted; the firewall only applies at runtime.
-- **Outbound hosts** — add domains to `.devcontainer/domains.conf` (one host per
-  line). Only what your project adds: the baseline (Anthropic, npm, Docker Hub,
-  `fm.codeborne.com`) lives in `.template/domains-base.conf`, and GitHub ranges are
-  fetched dynamically. The baseline sits on the template's side of the split on
-  purpose — a host added to it reaches existing projects on their next update,
-  whereas `domains.conf` is frozen the moment a project is installed.
-- **Ports** — nothing to configure. The app runs on the host and the container
-  reaches it at `host.docker.internal:PORT`. Exposing a port *from* the container
-  is a `ports:` entry in the override — see [Configuration](#configuration).
-- **Firewall rules** — the template covers the hosts in `domains.conf`, the GitHub
-  ranges, the container's own subnets and the host itself. Anything else — an IP
-  range no hostname resolves to, a single host:port, inbound from the LAN — goes in
-  `.devcontainer/firewall.sh`, which is sourced while the rules are still
-  being built.
-- **Extra services** — add them to `.devcontainer/docker-compose.override.yml`,
-  which is merged on top of the template's compose file. Mind that relative paths
-  there resolve against `.template/`, since that is where the base compose file
-  lives — `../data` is `.devcontainer/data`.
-
-Each of these is a build input, so `start.sh` rebuilds when you change one. The
-full list of knobs, including the ones that do *not* survive an update, is in
-[Configuration](#configuration).
-
-## Configuration
-
-Everything that can be configured, grouped by the question that actually matters:
-**does my change survive an update?**
-
-### Yours — survives updates
-
-The three files at the top of `.devcontainer/`. Created once, never overwritten.
+**The four files at the top are yours.** Created once, never overwritten, so a
+template update cannot touch them. Everything else says `DO NOT CHANGE THIS FILE`
+at the top and is replaced on update. Each of the four is a build input, so
+`start.sh` rebuilds when you change one.
 
 | File | What goes in it |
 |------|-----------------|
-| `tools.sh` | Anything the image needs beyond Node and Java. Plain shell, root, build time, unrestricted network. |
-| `domains.conf` | Outbound hosts your project needs, one per line. The baseline is elsewhere — see below. |
-| `firewall.sh` | `iptables`/`ipset` rules for anything hostnames cannot express. |
+| `tools.sh` | Toolchain beyond the Node and Java the image already has — Python, database clients, … Plain shell, run as root at build time with unrestricted network. |
+| `domains.conf` | Outbound hosts, one per line. Only what your project adds: the baseline (Anthropic, npm, Docker Hub, `fm.codeborne.com`) is in `.template/domains-base.conf`, and GitHub ranges are fetched dynamically. |
+| `firewall.sh` | `iptables`/`ipset` rules hostnames cannot express. Sourced at container start while the rules are still being built, before the catch-all reject. |
 | `docker-compose.override.yml` | Services, published ports, environment, extra volumes. Merged on top of the template's compose file. |
 
-Two recipes worth knowing for the override file:
+Nothing needs configuring to reach the host — it is at `host.docker.internal:PORT`,
+which the firewall allows — or to reach a sibling compose service, which resolves
+by its service name. Two recipes for the override file:
 
 ```yaml
 services:
-  # Expose a container port to a browser on your machine. Bind to localhost — the
+  # Expose a container port to a browser on your machine. Bind to localhost: the
   # short "5173:5173" form binds every interface, LAN included.
   devcontainer:
     ports:
       - "127.0.0.1:5173:5173"
 
-  # Reach a sibling service at localhost:5432 instead of db:5432, for config that
-  # cannot be moved off localhost. Without this the service is reachable by name.
+  # Only for config that cannot be moved off localhost — gives the service the
+  # devcontainer's network namespace, so it answers on localhost:5432.
   db:
     image: postgres:17
     network_mode: "service:devcontainer"
 ```
 
-### Chosen at install time
+Relative paths in the override resolve against `.template/`, since that is where
+the base compose file lives: `../data` is `.devcontainer/data`.
 
-Recorded in `.devcontainer/.template-version`, which is meant to be committed. To
-change any of them later, re-run the installer with the new flag and `--force`.
+### Knobs that do not survive an update
 
-| Knob | Flag | Default |
-|------|------|---------|
-| Project name (image, compose project) | `--name NAME` | prompted |
-| tmux windows, each running a Claude | `--windows N` | `1` |
-| Container timezone | `--timezone ZONE` | `Europe/Tallinn` |
-| Template repo to install and update from | `CLAUDE_DEVCONTAINER_REPO` env | this repo |
-| Ref to install from | `CLAUDE_DEVCONTAINER_REF` env | `main` |
-
-`TEMPLATE_REF` in that file is the branch or tag the project tracks for updates;
-`update.sh` resolves it on every check.
-
-### Per run — nothing to edit
-
-| Want | Do |
-|------|-----|
-| A different window count for one run | `TMUX_WINDOWS=3 ./.devcontainer/start.sh` |
-| Resume the previous Claude session | `./.devcontainer/start.sh -r` |
-| Work on a git worktree | `./.devcontainer/start.sh feature-x` |
-| Re-attach without rebuilding | `./.devcontainer/attach.sh` |
-| Check for, or apply, a template update | `./.devcontainer/update.sh [--check\|--force\|--ref REF]` — see [Updating](#updating) |
-
-### Template-owned — editable, but overwritten on update
-
-These are real knobs, and editing them works. They just belong to the template, so
-the next `update.sh` replaces them. Fine for a one-off experiment; see the escape
-hatch below for anything you want to keep.
+These work, but they live in template-owned files, so the next update replaces
+them. Fine for an experiment; fork the template for anything you want to keep.
 
 | Knob | File | What it does |
 |------|------|--------------|
-| `NODE_MAJOR` | `.template/Dockerfile` | Node LTS line to install (currently `24`) |
-| `openjdk-25-jdk-headless` | `.template/Dockerfile` | JDK package; swap for another LTS, or the `jre` variant for a smaller image |
+| `NODE_MAJOR` | `.template/Dockerfile` | Node LTS line (currently `24`) |
+| `openjdk-25-jdk-headless` | `.template/Dockerfile` | JDK package; another LTS, or `jre` for a smaller image |
 | `ENV` block | `.template/Dockerfile` | `CLAUDE_CONFIG_DIR`, `SHELL`, `LANG`, `COLORTERM`, `DISABLE_AUTOUPDATER` |
-| `docker.sock` mount | `.template/docker-compose.yml` | Lets the container drive the host Docker daemon — needed for tests that start containers, and on its own equivalent to control of the host. Drop the line if you never do that. |
-| `extra_hosts` | `.template/docker-compose.yml` | Makes `host.docker.internal` exist on Linux — see [Platforms](#platforms) |
-| `domains-base.conf` | `.template/` | The baseline outbound hosts. Template-owned on purpose, so updates can extend it for existing projects. |
+| `docker.sock` mount | `.template/docker-compose.yml` | Lets the container drive the host Docker daemon — needed for tests that start containers. Drop the line if you never do that. |
+| `extra_hosts` | `.template/docker-compose.yml` | Makes `host.docker.internal` exist on Linux Docker Engine |
+| `domains-base.conf` | `.template/` | Baseline outbound hosts; template-owned so updates can extend it |
 | `tmux.conf` | `.template/` | Prefix, mouse, scrollback, truecolor, clipboard, copy mode |
-| Feature list | `.template/devcontainer.json` + `devcontainer-lock.json` | `common-utils`, Claude, `docker-outside-of-docker`, pinned by digest |
-| `--dangerously-skip-permissions` | `start.sh`, `attach.sh` | How Claude is launched. The firewall is the compensating control — see [Notes](#notes). |
+| Feature list | `.template/devcontainer.json` + lock | `common-utils`, Claude, `docker-outside-of-docker`, pinned by digest |
+| `--dangerously-skip-permissions` | `start.sh`, `attach.sh` | How Claude is launched |
 
-**Escape hatch.** To make a machinery change permanent, fork this repo, commit the
-change there, and install pointing at the fork:
+To make such a change permanent, fork this repo and install from the fork — it is
+recorded in `.template-version`, so updates come from it too:
 
 ```sh
-CLAUDE_DEVCONTAINER_REPO=https://github.com/you/your-fork \
-  ./install.sh --name myapp /path/to/your/project
+CLAUDE_DEVCONTAINER_REPO=https://github.com/you/your-fork ./install.sh --name myapp .
 ```
-
-The fork is recorded in `.template-version`, so updates come from it too.
 
 ### State files
 
 | File | Effect of deleting it |
 |------|-----------------------|
-| `.devcontainer/.build-hash` | Next `start.sh` treats the inputs as changed and does a clean rebuild. Gitignored. |
-| `.devcontainer/.update-check` | Next update check fetches the remote SHA instead of using the cached one (cache lives one day). Gitignored. |
-| `claude-shared` Docker volume | Discards the Claude login and config shared by **all** projects. Recreate with `docker volume create claude-shared`, then `/login` again. |
-
-## Run
-
-```sh
-cd /path/to/your/project
-./.devcontainer/start.sh          # first run: builds, starts, attaches Claude
-./.devcontainer/attach.sh         # later: re-attach to the live session
-./.devcontainer/start.sh -r       # rebuild + resume the previous Claude session
-./.devcontainer/start.sh feature-x   # run Claude on git worktree "feature-x"
-```
-
-`start.sh` hashes the build inputs and only forces a clean rebuild when they
-change; otherwise it reuses the existing container. It also prints a one-line
-notice when a newer template exists (see [Updating](#updating)). The tmux session
-(and the Claude login, via the `claude-shared` volume) persists across
-disconnects and rebuilds, so you can detach, reconnect from another machine, and
-pick up exactly where you left off. Set `TMUX_WINDOWS=N` in the environment to
-override the window count for a single run.
-
-The `claude-shared` volume is global — every project installed from this
-template mounts the same one, so a single `/login` in any devcontainer
-authenticates them all. `start.sh` creates the volume on first run; if you bring
-the container up some other way, create it once with
-`docker volume create claude-shared`.
+| `.devcontainer/.build-hash` | Next `start.sh` does a clean rebuild. Gitignored. |
+| `.devcontainer/.update-check` | Next update check fetches the remote SHA instead of the day-old cache. Gitignored. |
+| `claude-shared` volume | Discards the Claude login shared by all projects. |
 
 ## Updating
 
-`install.sh` records the template commit it installed from in
-`.devcontainer/.template-version` (commit that file). `start.sh` compares it
-against the repo on every run — the remote SHA is cached for a day, times out
-after 5 s, and stays quiet when offline — and prints one line when a newer
-template exists:
+`install.sh` records the commit it installed from in
+`.devcontainer/.template-version` — commit that file. `start.sh` compares it
+against the repo on every run (SHA cached for a day, 5 s timeout, silent offline)
+and prints one line when a newer template exists:
 
 ```
 ⚡ devcontainer template update: fe7781b → a3c91f2 — run ./.devcontainer/update.sh
 ```
-
-Updating an installed project is one command:
 
 ```sh
 ./.devcontainer/update.sh            # update to the latest commit
@@ -304,48 +165,26 @@ Updating an installed project is one command:
 ./.devcontainer/update.sh --ref v2   # update to a specific branch, tag or commit
 ```
 
-A project that has no `update.sh` yet — installed before it existed — is bootstrapped
-with the installer instead; see [below](#projects-installed-before-any-of-this-existed).
+An update is the installer re-run at a newer commit: template-owned files are
+rewritten, your four are left alone, and the changed build inputs make the next
+`start.sh` rebuild. Nothing to merge. It refuses to run on a dirty
+`.devcontainer/`, so `git diff` afterwards shows exactly what changed and
+`git checkout` undoes it; `--force` overrides.
 
-An update is simply the installer re-run at a newer commit: template-owned files
-are rewritten, your four config files are left alone, and the new build inputs
-make the next `start.sh` do a clean rebuild. There is nothing to merge.
+### Projects installed before `update.sh` existed
 
-It refuses to run on a dirty `.devcontainer/`, so `git diff` afterwards shows
-exactly what the update changed and `git checkout` undoes it. Pass `--force` to
-override that.
-
-### Projects installed before any of this existed
-
-They have no `update.sh` and no `.template-version`, so bootstrap them with the
-installer. Run it in the project directory:
+Bootstrap them with the installer, run in the project directory — no arguments, it
+reads the existing answers back out of the install:
 
 ```sh
 curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh | bash
 ```
 
-Nothing to pass: it finds the existing install, reads the project name, window count
-and timezone back out of it, and offers those as the defaults — so pressing Enter
-three times keeps what the project already had. It also knows the Docker objects
-under that name are this project's own, so it does not mistake them for a clash.
-
-Afterwards the project has `update.sh` and a stamp, and every later update is a
-single `./.devcontainer/update.sh`.
-
-**Expect manual work, and read the warning it prints.** An old install owns its
-`Dockerfile`, `docker-compose.yml` and `init-firewall.sh` — in practice projects
-customise all three heavily — and those files are template-owned now, so the
-installer replaces them. It keeps verbatim copies first:
-
-```
-.devcontainer/Dockerfile.from-old
-.devcontainer/docker-compose.yml.from-old
-.devcontainer/init-firewall.sh.from-old
-```
-
-Nothing is lost, but moving the content across is yours to do: the old template had
-no marker saying which lines were the project's, so it cannot be automated. Where
-each kind of change belongs now:
+Such a project owns its `Dockerfile`, `docker-compose.yml` and
+`init-firewall.sh`, and those are template-owned now, so the installer replaces
+them — keeping a verbatim `<file>.from-old` copy of each first, and printing a
+warning. Nothing is lost, but moving the content across is manual: the old
+template had no marker saying which lines were the project's.
 
 | Was in the old file | Goes to |
 |---------------------|---------|
@@ -353,108 +192,40 @@ each kind of change belongs now:
 | `iptables` / `ipset` rules | `firewall.sh` |
 | Extra compose services | `docker-compose.override.yml` |
 | Outbound hosts | `domains.conf` |
-| `ENV`, `COPY`, other image-level lines | Nowhere — fork the template (see [Configuration](#configuration)) |
+| `ENV`, `COPY`, other image-level lines | Nowhere — fork the template |
 
-Delete the `.from-old` files once you are done. Two things are handled for you:
-
-- `allowed-domains.conf` is renamed to `domains.conf`, entries untouched. It will
-  still hold the baseline hosts that now also live in `.template/domains-base.conf`
-  — harmless duplication, trim if you like.
-- `OPEN_PORTS` and `PORT_FORWARDS` are gone, and the installer reports what yours
-  held. Reach sibling services by name (`db:5432`) and publish a port in the
-  override if you need it exposed; neither needs a firewall rule.
-
-Also worth knowing: `update.sh` copes with a missing stamp on its own, reading the
-project name, window count and timezone back out of the installed files rather than
-asking again.
-
-## Migrating an older install
-
-Installs made before the shared-login change gave every project its own
-`<project>_claude` volume — and therefore its own `/login`. To move an existing
-project over, re-run the installer on it with the **same project name** plus
-`--force` (required, since the compose project/image/volumes already exist):
-
-```sh
-cd /path/to/your/project
-curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh \
-  | bash -s -- --name <project> --force
-```
-
-This does three things:
-
-1. **Overwrites the template-owned files**, keeping the four user-owned ones.
-   Customizations that predate the split are rescued rather than lost — see
-   [Projects installed before any of this existed](#projects-installed-before-any-of-this-existed)
-   for what lands where and which part you still have to move by hand. The project
-   is in git either way, so `git diff` shows exactly what changed.
-2. **Migrates the login**: if the old `<project>_claude` volume exists and
-   `claude-shared` does not yet hold a login, its contents (credentials, config,
-   session transcripts) are copied into `claude-shared`. If `claude-shared` is
-   already logged in — e.g. another project migrated first — nothing is copied;
-   that login already covers every project.
-3. **Leaves the old volume in place.** Once the new setup works, reclaim the
-   space with `docker volume rm <project>_claude`.
-
-Then run `./.devcontainer/start.sh` — it notices the changed build inputs, does
-a clean rebuild, and the new container mounts `claude-shared`.
-
-To migrate by hand instead: make the same edits the template got (volume
-`name: claude-shared` + `external: true` in `.template/docker-compose.yml`, the
-`docker volume create claude-shared` line in `start.sh`) and seed the volume
-yourself:
-
-```sh
-docker volume create claude-shared
-docker run --rm -v <project>_claude:/from -v claude-shared:/to alpine cp -a /from/. /to
-```
-
-## Platforms
-
-The same install works from a macOS host (Docker Desktop or OrbStack) and a Linux
-host (Docker Engine), on x86-64 and arm64. The parts that would otherwise differ:
-
-- **Reaching the host.** `host.docker.internal` is published by Docker Desktop and
-  OrbStack but not by Docker Engine on Linux, so the compose file declares
-  `extra_hosts: host.docker.internal:host-gateway`. Docker fills in the right
-  address; where the runtime already provides the name, its own mapping wins. The
-  firewall then allows whatever it resolves to, assuming nothing about the value.
-- **File ownership.** On Linux a bind-mounted file keeps the host's UID, which would
-  not match the container's `dev` user. The devcontainer CLI remaps the container
-  user's UID/GID to yours by default (`--update-remote-user-uid-default on`), so
-  this needs no configuration. On macOS the runtime translates ownership anyway.
-- **Architecture.** The base image, NodeSource and Debian's JDK all cover amd64 and
-  arm64, and `JAVA_HOME` is derived from `javac`'s real path rather than a
-  hardcoded `-arm64`/`-amd64` directory.
-- **Host scripts.** They stick to what both BSD and GNU userlands have: `sed -i.bak`
-  works on both, and the build-input hash falls back from `sha256sum` to
-  `shasum -a 256` where coreutils is absent.
-
-Not covered: rootless Docker on Linux puts the socket somewhere other than
-`/var/run/docker.sock`, so the mount in `.template/docker-compose.yml` needs
-adjusting there.
+Handled for you: `allowed-domains.conf` is renamed to `domains.conf` with entries
+intact, and the old `OPEN_PORTS`/`PORT_FORWARDS` arrays are reported rather than
+carried over — neither is needed any more. A per-project `<project>_claude` volume
+from the pre-shared-login era is copied into `claude-shared`, and can be removed
+with `docker volume rm <project>_claude` once the new setup works. Delete the
+`.from-old` files when you are done.
 
 ## Requirements
 
-- Docker (with Compose v2)
-- `bash` and `curl` — `curl` also does the update check and the update itself;
-  plus `tar` when installing without a checkout
-- Node.js / `npm` on the host — `start.sh` installs the `@devcontainers/cli`
-  locally into the project on first run.
+- Docker with Compose v2 — Docker Desktop, OrbStack or Docker Engine
+- `bash`, `curl`, and `tar` when installing without a checkout
+- Node.js / `npm` on the host: `start.sh` installs the `@devcontainers/cli`
+  locally into the project on first run
+
+The same install works from macOS and Linux, on x86-64 and arm64. Where the two
+would differ the template handles it: `extra_hosts` gives Linux a
+`host.docker.internal`, the devcontainer CLI remaps the container user's UID to
+yours on Linux bind mounts, `JAVA_HOME` is derived rather than hardcoded per
+architecture, and the host scripts stick to what both BSD and GNU userlands have.
+Rootless Docker is the exception — its socket is not at `/var/run/docker.sock`, so
+that mount needs adjusting.
 
 ## Notes
 
 - **The sandbox is not a security boundary against a hostile toolchain.** The
-  container runs with `NET_ADMIN`/`NET_RAW` (needed to program iptables) and mounts
-  the host Docker socket — which is kept deliberately, since integration tests
-  start containers of their own, and which by itself amounts to control of the
-  host. The firewall limits accidental and agent egress; it does not contain a
-  determined attacker.
-- **The host is reachable, on every port.** The firewall allows whatever
-  `host.docker.internal` resolves to, because the application under development
-  runs there. That also puts anything else listening on your machine — other
-  projects' databases, your IDE's built-in server, SSH — within reach of code
-  running in the container. Bind local dev services to `127.0.0.1` if you would
-  rather they were not visible.
+  container has `NET_ADMIN`/`NET_RAW` and mounts the host Docker socket, which by
+  itself amounts to control of the host. The firewall limits accidental and agent
+  egress; it does not contain a determined attacker.
+- **The host is reachable on every port.** The firewall allows whatever
+  `host.docker.internal` resolves to, because your application runs there — which
+  also puts other projects' databases, your IDE's built-in server and SSH within
+  reach of code in the container. Bind local dev services to `127.0.0.1` if you
+  would rather they were not visible.
 - Claude is launched with `--dangerously-skip-permissions`; the firewall is the
   compensating control. Review `domains.conf` before trusting it.
