@@ -66,6 +66,7 @@ BUILD_INPUTS=(
     "$TEMPLATE_DIR/devcontainer.json"
     "$SCRIPT_DIR/tools.sh"
     "$SCRIPT_DIR/domains.conf"
+    "$SCRIPT_DIR/firewall.sh"
     "$SCRIPT_DIR/docker-compose.override.yml"
 )
 # sha256sum is GNU coreutils; macOS only started shipping it recently, and shasum is

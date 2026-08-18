@@ -12,6 +12,7 @@ Running `install.sh` writes this into your project:
 .devcontainer/
 ├── tools.sh                     ← yours: project toolchain
 ├── domains.conf                 ← yours: extra outbound hosts
+├── firewall.sh                  ← yours: extra firewall rules
 ├── docker-compose.override.yml  ← yours: compose additions
 │
 ├── start.sh                     the commands you run
@@ -27,7 +28,7 @@ Running `install.sh` writes this into your project:
     └── tmux.conf
 ```
 
-**The three files at the top are yours.** They are created once and never
+**The four files at the top are yours.** They are created once and never
 overwritten, so a template update cannot touch them. Below them sit the three
 commands you run. Everything else is machinery: it says `DO NOT CHANGE THIS FILE`
 at the top, is replaced on update, and lives out of sight in `.template/`.
@@ -43,6 +44,7 @@ Yours:
 |------|---------|
 | `tools.sh` | Your project's toolchain (Node, JDK, Python, …). Plain shell, run as root at image build time with full network. |
 | `domains.conf` | Extra outbound hosts, one per line. |
+| `firewall.sh` | `iptables`/`ipset` rules the template cannot know about. Sourced at container start, before the catch-all reject. |
 | `docker-compose.override.yml` | Extra services, ports, env and volumes, merged on top of the template's compose file. |
 
 The application under development is meant to run on the **host**, not in the
@@ -132,7 +134,7 @@ curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh \
 ## After installing
 
 The base image ships Node and Java (current LTS lines); everything else is yours to
-add. Customise — all three files survive template updates:
+add. Customise — all four files survive template updates:
 
 - **Toolchain** — write plain shell into `.devcontainer/tools.sh` for anything
   beyond Node and Java (Python, database clients, …). It runs as root at build
@@ -146,6 +148,11 @@ add. Customise — all three files survive template updates:
 - **Ports** — nothing to configure. The app runs on the host and the container
   reaches it at `host.docker.internal:PORT`. Exposing a port *from* the container
   is a `ports:` entry in the override — see [Configuration](#configuration).
+- **Firewall rules** — the template covers the hosts in `domains.conf`, the GitHub
+  ranges, the container's own subnets and the host itself. Anything else — an IP
+  range no hostname resolves to, a single host:port, inbound from the LAN — goes in
+  `.devcontainer/firewall.sh`, which is sourced while the rules are still
+  being built.
 - **Extra services** — add them to `.devcontainer/docker-compose.override.yml`,
   which is merged on top of the template's compose file. Mind that relative paths
   there resolve against `.template/`, since that is where the base compose file
@@ -168,6 +175,7 @@ The three files at the top of `.devcontainer/`. Created once, never overwritten.
 |------|-----------------|
 | `tools.sh` | Anything the image needs beyond Node and Java. Plain shell, root, build time, unrestricted network. |
 | `domains.conf` | Outbound hosts your project needs, one per line. The baseline is elsewhere — see below. |
+| `firewall.sh` | `iptables`/`ipset` rules for anything hostnames cannot express. |
 | `docker-compose.override.yml` | Services, published ports, environment, extra volumes. Merged on top of the template's compose file. |
 
 Two recipes worth knowing for the override file:
@@ -285,11 +293,16 @@ template exists:
 ⚡ devcontainer template update: fe7781b → a3c91f2 — run ./.devcontainer/update.sh
 ```
 
+Updating an installed project is one command:
+
 ```sh
 ./.devcontainer/update.sh            # update to the latest commit
 ./.devcontainer/update.sh --check    # just report; exit 1 = update available
 ./.devcontainer/update.sh --ref v2   # update to a specific branch, tag or commit
 ```
+
+A project that has no `update.sh` yet — installed before it existed — is bootstrapped
+with the installer instead; see [below](#projects-installed-before-any-of-this-existed).
 
 An update is simply the installer re-run at a newer commit: template-owned files
 are rewritten, your four config files are left alone, and the new build inputs
@@ -301,43 +314,52 @@ override that.
 
 ### Projects installed before any of this existed
 
-They have no `update.sh` and no `.template-version`, so bootstrap them by running
-the installer once — the same command as a fresh install, with the **same project
-name** and `--force`:
+They have no `update.sh` and no `.template-version`, so bootstrap them with the
+installer. One line, from the project directory — same project name as before, and
+`--force` because its compose project, image and volumes already exist:
 
 ```sh
-cd /path/to/your/project
-curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh \
-  | bash -s -- --name <project> --force
+cd /path/to/your/project && curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh | bash -s -- --name <project> --force
 ```
 
-Seeing no stamp, the installer recognises the old layout, moves the machinery into
-`.template/`, and rescues what used to live in template-owned files before
-replacing them:
+Afterwards the project has `update.sh` and a stamp, and every later update is a
+single `./.devcontainer/update.sh`.
 
-- `PORT_FORWARDS` and `OPEN_PORTS` are gone; the installer reports what yours held
-  and what replaces it. Reach sibling services by name (`db:5432`), and publish a
-  port in the override if you need it exposed.
-- `allowed-domains.conf` is renamed to `domains.conf`, entries untouched. Nothing
-  to do — though it will still hold the baseline hosts that now also live in
-  `.template/domains-base.conf`. The duplicates are harmless; trim them if you
-  like.
-- Toolchain lines found in the `Dockerfile` are saved verbatim to
-  `tools.from-dockerfile`. **Manual**: they are Dockerfile syntax, not shell, so
-  move them into `tools.sh` yourself (drop the leading `RUN `) and delete the
-  `.from-dockerfile` file. Until you do, the image builds without your toolchain.
-- If the old `docker-compose.yml` defined services beyond `devcontainer`, it is
-  copied to `docker-compose.from-old.yml`. **Manual**: move those services into
-  `docker-compose.override.yml`. Anything referring to those services by name will
-  not resolve until you do.
+**Expect manual work, and read the warning it prints.** An old install owns its
+`Dockerfile`, `docker-compose.yml` and `init-firewall.sh` — in practice projects
+customise all three heavily — and those files are template-owned now, so the
+installer replaces them. It keeps verbatim copies first:
 
-The installer prints a warning for each manual step. Afterwards the project has
-`update.sh` and a stamp, and every later update is a single
-`./.devcontainer/update.sh`.
+```
+.devcontainer/Dockerfile.from-old
+.devcontainer/docker-compose.yml.from-old
+.devcontainer/init-firewall.sh.from-old
+```
 
-From that point on, `update.sh` also copes with a missing stamp on its own: it
-reads the project name, window count and timezone back out of the installed files
-rather than asking again.
+Nothing is lost, but moving the content across is yours to do: the old template had
+no marker saying which lines were the project's, so it cannot be automated. Where
+each kind of change belongs now:
+
+| Was in the old file | Goes to |
+|---------------------|---------|
+| Toolchain (`apt`/`curl` installs) | `tools.sh` |
+| `iptables` / `ipset` rules | `firewall.sh` |
+| Extra compose services | `docker-compose.override.yml` |
+| Outbound hosts | `domains.conf` |
+| `ENV`, `COPY`, other image-level lines | Nowhere — fork the template (see [Configuration](#configuration)) |
+
+Delete the `.from-old` files once you are done. Two things are handled for you:
+
+- `allowed-domains.conf` is renamed to `domains.conf`, entries untouched. It will
+  still hold the baseline hosts that now also live in `.template/domains-base.conf`
+  — harmless duplication, trim if you like.
+- `OPEN_PORTS` and `PORT_FORWARDS` are gone, and the installer reports what yours
+  held. Reach sibling services by name (`db:5432`) and publish a port in the
+  override if you need it exposed; neither needs a firewall rule.
+
+Also worth knowing: `update.sh` copes with a missing stamp on its own, reading the
+project name, window count and timezone back out of the installed files rather than
+asking again.
 
 ## Migrating an older install
 

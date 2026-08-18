@@ -60,6 +60,7 @@ MACHINERY_FILES=("${HIDDEN_FILES[@]}" "${VISIBLE_TEMPLATE_FILES[@]}")
 USER_FILES=(
     tools.sh
     domains.conf
+    firewall.sh
     docker-compose.override.yml
 )
 # All files the template must provide (used to detect a complete template dir).
@@ -299,19 +300,17 @@ list_conflicts() {
 migrate_pre_split_config() {
     [[ -d "$DEST" && ! -f "$DEST/.template-version" ]] || return 0
 
-    # Neither of the old port arrays is carried over: nothing reads them any more.
-    # OPEN_PORTS never was what made a port reachable (the firewall accepts the
-    # directly-connected subnets wholesale), and PORT_FORWARDS existed to fake
-    # localhost:PORT for a sibling service — which compose already answers with a
-    # service name. Both are reported instead of copied, so a project that used them
-    # is told what replaces them rather than left with config nothing honours.
-    local old_ports
-    old_ports="$(sed -n 's/^OPEN_PORTS=(\(.*\))/\1/p' "$DEST/init-firewall.sh" 2>/dev/null | head -1)"
-    [[ -n "${old_ports// /}" ]] && MIGRATED_OPEN_PORTS="$old_ports"
-    if grep -q '^PORT_FORWARDS=($' "$DEST/init-firewall.sh" 2>/dev/null \
-       && awk '/^PORT_FORWARDS=\(/,/\)/' "$DEST/init-firewall.sh" | grep -q '"'; then
-        MIGRATED_FORWARDS=1
-    fi
+    # Keep verbatim copies of every template-owned file about to be replaced, before
+    # anything here touches them. Unconditional on purpose: the older templates had
+    # no marker delimiting "your part", customizations sit anywhere in these files,
+    # and a project may have rewritten init-firewall.sh outright — several have.
+    # Guessing which lines are the user's is not possible, so keep the whole file.
+    local f
+    for f in Dockerfile docker-compose.yml init-firewall.sh; do
+        [[ -f "$DEST/$f" && ! -f "$DEST/$f.from-old" ]] || continue
+        cp "$DEST/$f" "$DEST/$f.from-old"
+        BACKED_UP+=("$f.from-old")
+    done
 
     # The host list keeps its format and only changes name.
     if [[ ! -f "$DEST/domains.conf" && -f "$DEST/allowed-domains.conf" ]]; then
@@ -319,32 +318,17 @@ migrate_pre_split_config() {
         echo "→ Renamed allowed-domains.conf to domains.conf (your entries are untouched)"
     fi
 
-    # Extra services used to be added straight into docker-compose.yml, which the
-    # template owns and is about to replace. Losing them silently is worse than it
-    # sounds: a PORT_FORWARDS entry pointing at a service that no longer exists
-    # makes init-firewall.sh exit 1, and the container then fails to start at all.
-    if [[ -f "$DEST/docker-compose.yml" ]] && awk '
-        /^services:/ { s=1; next }
-        /^[^ #]/     { s=0 }
-        s && /^  [A-Za-z0-9_.-]+:/ {
-            name=$1; sub(/:$/, "", name)
-            if (name != "devcontainer") found=1
-        }
-        END { exit !found }' "$DEST/docker-compose.yml"; then
-        cp "$DEST/docker-compose.yml" "$DEST/docker-compose.from-old.yml"
-        MIGRATED_COMPOSE=1
-        echo "→ Saved your old docker-compose.yml to docker-compose.from-old.yml (it defines extra services)"
-    fi
-
-    # The toolchain is Dockerfile syntax, not shell, so it cannot be converted
-    # mechanically — keep it verbatim beside the new script for the user to move.
-    local toolchain
-    toolchain="$(awk '/Add your project.s toolchain below/{f=1; next} f' "$DEST/Dockerfile" 2>/dev/null \
-                 | grep -vE '^[[:space:]]*#|^[[:space:]]*$|^WORKDIR ' || true)"
-    if [[ -n "$toolchain" ]]; then
-        printf '%s\n' "$toolchain" > "$DEST/tools.from-dockerfile"
-        MIGRATED_TOOLCHAIN=1
-        echo "→ Saved your Dockerfile toolchain lines to tools.from-dockerfile"
+    # Neither of the old port arrays is carried over: nothing reads them any more.
+    # OPEN_PORTS never was what made a port reachable (the firewall accepts the
+    # directly-connected subnets wholesale), and PORT_FORWARDS existed to fake
+    # localhost:PORT for a sibling service — which compose already answers with a
+    # service name. Both are reported rather than copied, so a project that used them
+    # is told what replaces them instead of keeping config nothing honours.
+    local old_ports
+    old_ports="$(sed -n 's/^OPEN_PORTS=(\(.*\))/\1/p' "$DEST/init-firewall.sh.from-old" 2>/dev/null | head -1)"
+    [[ -n "${old_ports// /}" ]] && MIGRATED_OPEN_PORTS="$old_ports"
+    if awk '/^PORT_FORWARDS=\(/,/\)/' "$DEST/init-firewall.sh.from-old" 2>/dev/null | grep -q '"'; then
+        MIGRATED_FORWARDS=1
     fi
 }
 
@@ -468,8 +452,7 @@ fi
 
 # Recover a pre-split install's toolchain/ports before overwriting the files that
 # held them. No-op on fresh installs and on anything already carrying a stamp.
-MIGRATED_TOOLCHAIN=0
-MIGRATED_COMPOSE=0
+BACKED_UP=()
 MIGRATED_OPEN_PORTS=""
 MIGRATED_FORWARDS=0
 migrate_pre_split_config
@@ -538,17 +521,6 @@ if [[ ${#KEPT_FILES[@]} -gt 0 ]]; then
     printf '    kept as-is   : %s\n' "${KEPT_FILES[*]}"
 fi
 
-if [[ $MIGRATED_TOOLCHAIN -eq 1 ]]; then
-    cat <<EOF
-
-⚠  Your toolchain used to live in the Dockerfile, which this install replaced.
-   The old lines are in $DEST/tools.from-dockerfile.
-   Move them into $DEST/tools.sh as plain shell
-   (drop the leading 'RUN '), then delete the .from-dockerfile file.
-   Until you do, the image builds without your toolchain.
-EOF
-fi
-
 if [[ -n "$MIGRATED_OPEN_PORTS" ]]; then
     cat <<EOF
 
@@ -575,26 +547,37 @@ if [[ $MIGRATED_FORWARDS -eq 1 ]]; then
 EOF
 fi
 
-if [[ $MIGRATED_COMPOSE -eq 1 ]]; then
+if [[ ${#BACKED_UP[@]} -gt 0 ]]; then
     cat <<EOF
 
-⚠  Your old docker-compose.yml defined services beyond the devcontainer, and this
-   install replaced that file. A copy is in $DEST/docker-compose.from-old.yml.
-   Move those service definitions into $DEST/docker-compose.override.yml,
-   then delete the .from-old.yml file.
-   Anything that referred to those services by name will not resolve until you do.
+⚠  This install replaced template-owned files that your project had customised.
+   Verbatim copies are in $DEST:
+$(printf '     %s\n' "${BACKED_UP[@]}")
+   Nothing was thrown away, but moving the content across is manual — the old
+   template had no marker saying which lines were yours, so it cannot be automated.
+   Where each kind of change belongs now:
+
+     toolchain (apt/curl installs)  → tools.sh
+     iptables / ipset rules         → firewall.sh
+     extra compose services         → docker-compose.override.yml
+     outbound hosts                 → domains.conf
+
+   ENV, COPY and other image-level lines fit none of those; keep them by forking
+   this template and installing from the fork (see the README). Delete the
+   .from-old files once you are done.
 EOF
 fi
 
 cat <<EOF
 
-The three files at the top of $DEST are yours to edit;
+The four files at the top of $DEST are yours to edit;
 everything else there, including $TEMPLATE_SUBDIR/, is the template's and is
 replaced on update.
 
 Next:
   1. Add your project's toolchain to $DEST/tools.sh (Node/JDK/Python/…).
-  2. Add any extra outbound hosts to $DEST/domains.conf.
+  2. Add any extra outbound hosts to $DEST/domains.conf, and any
+     firewall rules the template cannot know about to $DEST/firewall.sh.
   3. Extra compose services go in $DEST/docker-compose.override.yml.
   4. Start it:   (cd "$TARGET_DIR" && ./.devcontainer/start.sh)
      Re-attach:  (cd "$TARGET_DIR" && ./.devcontainer/attach.sh)

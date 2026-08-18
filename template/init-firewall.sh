@@ -1,8 +1,8 @@
 #!/bin/bash
 #
 # DO NOT CHANGE THIS FILE. It belongs to the devcontainer template and is
-# overwritten whenever the template is updated. The hosts a project needs are read
-# from domains.conf, which is yours to edit.
+# overwritten whenever the template is updated. What a project needs is read from
+# domains.conf and firewall.sh, both of which are yours to edit.
 #
 set -euo pipefail  # Exit on error, undefined vars, and pipeline failures
 IFS=$'\n\t'       # Stricter word splitting
@@ -148,6 +148,17 @@ for ip in $HOST_IPS; do
     iptables -A OUTPUT -d "$ip" -j ACCEPT
     iptables -A INPUT -s "$ip" -j ACCEPT
 done
+
+# Project-specific rules (user-owned firewall.sh). Sourced here on purpose:
+# every allow rule above is in place, the policies are still ACCEPT, and the
+# catch-all REJECT below has not been appended yet — so a rule added there lands
+# where it actually takes effect.
+EXTRA_CONF="/usr/local/bin/firewall.sh"
+if [[ -f "$EXTRA_CONF" ]]; then
+    echo "Applying project rules from $(basename "$EXTRA_CONF")"
+    # shellcheck source=/dev/null
+    source "$EXTRA_CONF"
+fi
 
 # Set default policies to DROP first
 iptables -P INPUT DROP

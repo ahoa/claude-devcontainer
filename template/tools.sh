@@ -8,8 +8,8 @@
 # clean rebuild on the next run.
 #
 # This file is yours. The installer creates it once and never overwrites it, so
-# template updates leave your toolchain alone — as they do domains.conf and
-# docker-compose.override.yml. Everything else in .devcontainer/ belongs to the
+# template updates leave your toolchain alone — as they do domains.conf,
+# firewall.sh and docker-compose.override.yml. Everything else in .devcontainer/ belongs to the
 # template and IS overwritten; that is why it says so at the top of each file
 # and why the bulk of it is tucked away in .template/.
 #

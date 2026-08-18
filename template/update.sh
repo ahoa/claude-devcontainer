@@ -7,7 +7,8 @@
 #
 # Updating is just a re-run of the installer at a newer commit: it rewrites
 # .template/ and the scripts beside it, and leaves the three visible user-owned
-# files (tools.sh, domains.conf, docker-compose.override.yml) exactly as they are.
+# files (tools.sh, domains.conf, firewall.sh, docker-compose.override.yml)
+# exactly as they are.
 # That split is what makes an update safe, so there is nothing to merge here.
 #
 #   ./update.sh            update to the latest commit on the recorded ref
