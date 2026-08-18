@@ -144,22 +144,110 @@ add. Customise — all three files survive template updates:
   purpose — a host added to it reaches existing projects on their next update,
   whereas `domains.conf` is frozen the moment a project is installed.
 - **Ports** — nothing to configure. The app runs on the host and the container
-  reaches it at `host.docker.internal:PORT`. If you do want to expose something
-  *from* the container, publish it in the override — bound to localhost, since the
-  short `"5173:5173"` form binds every interface on your machine, LAN included:
-
-  ```yaml
-  services:
-    devcontainer:
-      ports:
-        - "127.0.0.1:5173:5173"
-  ```
+  reaches it at `host.docker.internal:PORT`. Exposing a port *from* the container
+  is a `ports:` entry in the override — see [Configuration](#configuration).
 - **Extra services** — add them to `.devcontainer/docker-compose.override.yml`,
   which is merged on top of the template's compose file. Mind that relative paths
   there resolve against `.template/`, since that is where the base compose file
   lives — `../data` is `.devcontainer/data`.
 
-Each of these is a build input, so `start.sh` rebuilds when you change one.
+Each of these is a build input, so `start.sh` rebuilds when you change one. The
+full list of knobs, including the ones that do *not* survive an update, is in
+[Configuration](#configuration).
+
+## Configuration
+
+Everything that can be configured, grouped by the question that actually matters:
+**does my change survive an update?**
+
+### Yours — survives updates
+
+The three files at the top of `.devcontainer/`. Created once, never overwritten.
+
+| File | What goes in it |
+|------|-----------------|
+| `tools.sh` | Anything the image needs beyond Node and Java. Plain shell, root, build time, unrestricted network. |
+| `domains.conf` | Outbound hosts your project needs, one per line. The baseline is elsewhere — see below. |
+| `docker-compose.override.yml` | Services, published ports, environment, extra volumes. Merged on top of the template's compose file. |
+
+Two recipes worth knowing for the override file:
+
+```yaml
+services:
+  # Expose a container port to a browser on your machine. Bind to localhost — the
+  # short "5173:5173" form binds every interface, LAN included.
+  devcontainer:
+    ports:
+      - "127.0.0.1:5173:5173"
+
+  # Reach a sibling service at localhost:5432 instead of db:5432, for config that
+  # cannot be moved off localhost. Without this the service is reachable by name.
+  db:
+    image: postgres:17
+    network_mode: "service:devcontainer"
+```
+
+### Chosen at install time
+
+Recorded in `.devcontainer/.template-version`, which is meant to be committed. To
+change any of them later, re-run the installer with the new flag and `--force`.
+
+| Knob | Flag | Default |
+|------|------|---------|
+| Project name (image, compose project) | `--name NAME` | prompted |
+| tmux windows, each running a Claude | `--windows N` | `1` |
+| Container timezone | `--timezone ZONE` | `Europe/Tallinn` |
+| Template repo to install and update from | `CLAUDE_DEVCONTAINER_REPO` env | this repo |
+| Ref to install from | `CLAUDE_DEVCONTAINER_REF` env | `main` |
+
+`TEMPLATE_REF` in that file is the branch or tag the project tracks for updates;
+`update.sh` resolves it on every check.
+
+### Per run — nothing to edit
+
+| Want | Do |
+|------|-----|
+| A different window count for one run | `TMUX_WINDOWS=3 ./.devcontainer/start.sh` |
+| Resume the previous Claude session | `./.devcontainer/start.sh -r` |
+| Work on a git worktree | `./.devcontainer/start.sh feature-x` |
+| Re-attach without rebuilding | `./.devcontainer/attach.sh` |
+| Check for, or apply, a template update | `./.devcontainer/update.sh [--check\|--force\|--ref REF]` — see [Updating](#updating) |
+
+### Template-owned — editable, but overwritten on update
+
+These are real knobs, and editing them works. They just belong to the template, so
+the next `update.sh` replaces them. Fine for a one-off experiment; see the escape
+hatch below for anything you want to keep.
+
+| Knob | File | What it does |
+|------|------|--------------|
+| `NODE_MAJOR` | `.template/Dockerfile` | Node LTS line to install (currently `24`) |
+| `openjdk-25-jdk-headless` | `.template/Dockerfile` | JDK package; swap for another LTS, or the `jre` variant for a smaller image |
+| `ENV` block | `.template/Dockerfile` | `CLAUDE_CONFIG_DIR`, `SHELL`, `LANG`, `COLORTERM`, `DISABLE_AUTOUPDATER` |
+| `docker.sock` mount | `.template/docker-compose.yml` | Lets the container drive the host Docker daemon — needed for tests that start containers, and on its own equivalent to control of the host. Drop the line if you never do that. |
+| `extra_hosts` | `.template/docker-compose.yml` | Makes `host.docker.internal` exist on Linux — see [Platforms](#platforms) |
+| `domains-base.conf` | `.template/` | The baseline outbound hosts. Template-owned on purpose, so updates can extend it for existing projects. |
+| `tmux.conf` | `.template/` | Prefix, mouse, scrollback, truecolor, clipboard, copy mode |
+| Feature list | `.template/devcontainer.json` + `devcontainer-lock.json` | `common-utils`, Claude, `docker-outside-of-docker`, pinned by digest |
+| `--dangerously-skip-permissions` | `start.sh`, `attach.sh` | How Claude is launched. The firewall is the compensating control — see [Notes](#notes). |
+
+**Escape hatch.** To make a machinery change permanent, fork this repo, commit the
+change there, and install pointing at the fork:
+
+```sh
+CLAUDE_DEVCONTAINER_REPO=https://github.com/you/your-fork \
+  ./install.sh --name myapp /path/to/your/project
+```
+
+The fork is recorded in `.template-version`, so updates come from it too.
+
+### State files
+
+| File | Effect of deleting it |
+|------|-----------------------|
+| `.devcontainer/.build-hash` | Next `start.sh` treats the inputs as changed and does a clean rebuild. Gitignored. |
+| `.devcontainer/.update-check` | Next update check fetches the remote SHA instead of using the cached one (cache lives one day). Gitignored. |
+| `claude-shared` Docker volume | Discards the Claude login and config shared by **all** projects. Recreate with `docker volume create claude-shared`, then `/login` again. |
 
 ## Run
 
