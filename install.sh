@@ -217,6 +217,40 @@ is_user_file() {
     return 1
 }
 
+# What an existing install in the target directory already answered, so a re-run can
+# offer those as defaults instead of asking blind. A wrong project name here is not
+# a typo but a second set of Docker objects, so it matters more than the others.
+#
+# Prefers the stamp; without one (an install predating it) the values are read back
+# out of the installed files, which is where they were substituted. Machinery may be
+# in .template/ or, before that move, flat in .devcontainer/.
+detect_existing_answers() {
+    # Separate statements: under `set -u`, a name declared in the same `local` is not
+    # yet visible to a later assignment in that statement.
+    local dest="$TARGET_DIR/.devcontainer"
+    local stamp="$dest/.template-version"
+    local f
+    [[ -d "$dest" ]] || return 0
+
+    if [[ -f "$stamp" ]]; then
+        EXISTING_NAME="$(sed -n 's/^PROJECT_NAME=//p'  "$stamp" | head -1)"
+        EXISTING_WINDOWS="$(sed -n 's/^TMUX_WINDOWS=//p' "$stamp" | head -1)"
+        EXISTING_TIMEZONE="$(sed -n 's/^TIMEZONE=//p'    "$stamp" | head -1)"
+    fi
+
+    for f in "$dest/.template/docker-compose.yml" "$dest/docker-compose.yml"; do
+        [[ -z "$EXISTING_NAME" && -f "$f" ]] || continue
+        EXISTING_NAME="$(awk -F': *' '/^name:/{print $2; exit}' "$f")"
+    done
+    if [[ -z "$EXISTING_WINDOWS" && -f "$dest/start.sh" ]]; then
+        EXISTING_WINDOWS="$(sed -n 's/^WINDOWS="\${TMUX_WINDOWS:-\([0-9]*\)}".*/\1/p' "$dest/start.sh" | head -1)"
+    fi
+    for f in "$dest/.template/Dockerfile" "$dest/Dockerfile"; do
+        [[ -z "$EXISTING_TIMEZONE" && -f "$f" ]] || continue
+        EXISTING_TIMEZONE="$(sed -n 's/^ENV TZ=//p' "$f" | head -1)"
+    done
+}
+
 # Where a template file is installed: machinery is tucked into .template/,
 # everything else sits at the top of .devcontainer/ where it can be seen.
 dest_path() {
@@ -373,13 +407,24 @@ migrate_claude_volume() {
 }
 
 # ── Resolve the project name (validate + conflict-check, re-prompt as needed) ─
+EXISTING_NAME=""
+EXISTING_WINDOWS=""
+EXISTING_TIMEZONE=""
+detect_existing_answers
+if [[ -n "$EXISTING_NAME" ]]; then
+    echo "Found an existing install in $TARGET_DIR/.devcontainer — its answers are the defaults below."
+fi
+
 if ! docker_available; then
     echo "Note: Docker daemon not reachable — skipping conflict checks (name format still validated)." >&2
 fi
 
 while :; do
     if [[ -z "$PROJECT_NAME" ]]; then
-        if ! prompt_user PROJECT_NAME "Project name (Docker image / compose project / volumes): "; then
+        if [[ -n "$EXISTING_NAME" ]]; then
+            prompt_user PROJECT_NAME "Project name [$EXISTING_NAME]: " || true
+            PROJECT_NAME="${PROJECT_NAME:-$EXISTING_NAME}"
+        elif ! prompt_user PROJECT_NAME "Project name (Docker image / compose project / volumes): "; then
             echo "ERROR: no project name given and no terminal to prompt on. Use --name NAME." >&2
             exit 1
         fi
@@ -389,6 +434,12 @@ while :; do
         echo "Invalid name '$PROJECT_NAME'. Use lowercase letters, digits, '-' and '_'; must start with a letter or digit." >&2
         if [[ $NAME_FROM_ARG -eq 1 ]] || ! have_tty; then exit 1; fi
         PROJECT_NAME=""; continue
+    fi
+
+    # Re-installing over the same project: the compose project, image and container
+    # it finds are this project's own, so there is nothing to conflict with.
+    if [[ "$PROJECT_NAME" == "$EXISTING_NAME" ]]; then
+        break
     fi
 
     conflicts="$(list_conflicts "$PROJECT_NAME" || true)"
@@ -412,8 +463,8 @@ done
 
 # ── Number of tmux windows ────────────────────────────────────────────────────
 if [[ -z "$TMUX_WINDOWS" ]]; then
-    prompt_user TMUX_WINDOWS "How many tmux windows (each runs its own Claude)? [1]: " || true
-    TMUX_WINDOWS="${TMUX_WINDOWS:-1}"
+    prompt_user TMUX_WINDOWS "How many tmux windows (each runs its own Claude)? [${EXISTING_WINDOWS:-1}]: " || true
+    TMUX_WINDOWS="${TMUX_WINDOWS:-${EXISTING_WINDOWS:-1}}"
 fi
 if [[ ! "$TMUX_WINDOWS" =~ ^[1-9][0-9]*$ ]]; then
     echo "ERROR: --windows must be a positive integer (got '$TMUX_WINDOWS')." >&2
@@ -425,8 +476,8 @@ fi
 # terminal; a bad --timezone is fatal.
 while :; do
     if [[ -z "$TIMEZONE" ]]; then
-        prompt_user TIMEZONE "Container timezone (IANA name) [$DEFAULT_TIMEZONE]: " || true
-        TIMEZONE="${TIMEZONE:-$DEFAULT_TIMEZONE}"
+        prompt_user TIMEZONE "Container timezone (IANA name) [${EXISTING_TIMEZONE:-$DEFAULT_TIMEZONE}]: " || true
+        TIMEZONE="${TIMEZONE:-${EXISTING_TIMEZONE:-$DEFAULT_TIMEZONE}}"
     fi
 
     if validate_timezone "$TIMEZONE"; then break; fi

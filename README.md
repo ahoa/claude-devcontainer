@@ -96,13 +96,16 @@ since the current one is the clone itself:
 ./install.sh /path/to/your/project
 ```
 
-It asks three things:
+It asks three things — and on a re-run in a directory that already has a
+`.devcontainer/`, each question defaults to what that install answered, so pressing
+Enter keeps it:
 
 1. **Project name** — used for the Docker image, the compose project name, and
    the named volumes. Must be lowercase (`[a-z0-9][a-z0-9_-]*`). The installer
    checks Docker for an existing compose project, volume, image, or container
    with that name and makes you pick another if it collides (override with
-   `--force`).
+   `--force`) — except when the name is the one the target directory is already
+   installed under, since then those objects are the project's own.
 2. **How many tmux windows** — each window runs its own Claude. Default `1`.
 3. **Timezone** — the container's clock, as an IANA zone name. Default
    `Europe/Tallinn`; press Enter to accept it. Checked against the host's
@@ -315,12 +318,16 @@ override that.
 ### Projects installed before any of this existed
 
 They have no `update.sh` and no `.template-version`, so bootstrap them with the
-installer. One line, from the project directory — same project name as before, and
-`--force` because its compose project, image and volumes already exist:
+installer. Run it in the project directory:
 
 ```sh
-cd /path/to/your/project && curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh | bash -s -- --name <project> --force
+curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh | bash
 ```
+
+Nothing to pass: it finds the existing install, reads the project name, window count
+and timezone back out of it, and offers those as the defaults — so pressing Enter
+three times keeps what the project already had. It also knows the Docker objects
+under that name are this project's own, so it does not mistake them for a clash.
 
 Afterwards the project has `update.sh` and a stamp, and every later update is a
 single `./.devcontainer/update.sh`.
