@@ -2,7 +2,7 @@
 # DO NOT CHANGE THIS FILE. It belongs to the devcontainer template and is
 # overwritten whenever the template is updated. Your project's settings go in the
 # visible files one level up: tools.sh (toolchain), domains.conf (outbound hosts),
-# ports.conf (inbound/forwarded ports), compose-extra.yml (extra services).
+# docker-compose.override.yml (compose additions).
 # ─────────────────────────────────────────────────────────────────────────────
 #
 # Build context is .devcontainer/, not .devcontainer/.template/, so this file can
@@ -72,12 +72,12 @@ RUN ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" > /etc/timezo
 RUN git config --global core.checkStat minimal && \
     git config --global core.trustctime false
 
-# Firewall script + its two config files (outbound hosts, inbound/forwarded
-# ports). Build-time has full network; the firewall only applies at container
-# runtime via postStartCommand.
+# Firewall script + its two host lists: the template's baseline and the project's
+# own additions. Build-time has full network; the firewall only applies at
+# container runtime via postStartCommand.
 COPY .template/init-firewall.sh /usr/local/bin/
+COPY .template/domains-base.conf /usr/local/bin/
 COPY domains.conf /usr/local/bin/
-COPY ports.conf /usr/local/bin/
 RUN chmod +x /usr/local/bin/init-firewall.sh && \
     echo "dev ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh" > /etc/sudoers.d/init-firewall && \
     chmod 0440 /etc/sudoers.d/init-firewall

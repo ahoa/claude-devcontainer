@@ -20,8 +20,10 @@
 # The empty `devcontainer: {}` below is a valid no-op — compose needs at least one
 # mapping, and the service's real definition is merged in from the template's file.
 #
-# Example — a Postgres the devcontainer can reach. Add "5432 db 5432" to
-# PORT_FORWARDS in ports.conf to also reach it as localhost:5432:
+# The application under development is meant to run on the host, not in here, so
+# most projects need nothing beyond the no-op below. When a service does belong in
+# the container's world, add it and reach it by name — compose puts both on the same
+# network, so db:5432 resolves with no firewall or port configuration at all:
 #
 #   services:
 #     db:
@@ -31,6 +33,10 @@
 #     devcontainer:
 #       environment:
 #         DATABASE_URL: postgres://postgres:dev@db:5432/postgres
+#
+# If some config insists on localhost:5432, give the service the devcontainer's
+# network namespace with `network_mode: "service:devcontainer"` instead of
+# forwarding ports. It then listens on the devcontainer's own loopback.
 
 services:
   devcontainer: {}

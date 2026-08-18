@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // DO NOT CHANGE THIS FILE. It belongs to the devcontainer template and is
 // overwritten whenever the template is updated. Your project's settings go in
-// tools.sh, domains.conf, ports.conf and docker-compose.override.yml.
+// tools.sh, domains.conf and docker-compose.override.yml.
 //
 // Paths below are relative to THIS file, i.e. to .devcontainer/.template/.
 // start.sh and attach.sh point the devcontainer CLI here with --config, which is

@@ -1,27 +1,13 @@
 #!/bin/bash
 #
 # DO NOT CHANGE THIS FILE. It belongs to the devcontainer template and is
-# overwritten whenever the template is updated. The two things a project needs to
-# set are read from ports.conf and domains.conf, which are yours to edit.
+# overwritten whenever the template is updated. The hosts a project needs are read
+# from domains.conf, which is yours to edit.
 #
 set -euo pipefail  # Exit on error, undefined vars, and pipeline failures
 IFS=$'\n\t'       # Stricter word splitting
 
 echo "=== Initializing container firewall ==="
-
-# --- Project-specific ports (user-owned config) ---
-# OPEN_PORTS and PORT_FORWARDS live in ports.conf, which the template never
-# overwrites. Defaults are set first, so a missing config file — or one that
-# defines only one of the two arrays — still leaves this script working.
-PORTS_CONF="/usr/local/bin/ports.conf"
-OPEN_PORTS=()
-PORT_FORWARDS=()
-if [[ -f "$PORTS_CONF" ]]; then
-    # shellcheck source=/dev/null
-    source "$PORTS_CONF"
-else
-    echo "No $PORTS_CONF — no extra inbound ports or port forwards"
-fi
 
 # --- Helper functions ---
 
@@ -52,27 +38,27 @@ fetch_json() {
 
 # --- Main script ---
 
-# 1. Extract Docker DNS info BEFORE any flushing
-DOCKER_DNS_RULES=$(iptables-save -t nat | grep "127\.0\.0\.11" || true)
-
-# Flush existing rules and delete existing ipsets
+# Flush our own rules and ipset. Only the filter table: every rule this script adds
+# lives there, so nat and mangle are none of its business.
+#
+# It used to flush nat too, saving and restoring just the 127.0.0.11 DNS rules. That
+# threw away the rest of the runtime's plumbing — including the DNAT that makes the
+# host reachable at host.docker.internal — and left the container unable to talk to
+# anything running on the host, which is where the application under development
+# runs. Leaving nat alone fixes that and needs no save/restore dance.
 iptables -F
 iptables -X
-iptables -t nat -F
-iptables -t nat -X
-iptables -t mangle -F
-iptables -t mangle -X
 ipset destroy allowed-domains 2>/dev/null || true
 
-# 2. Selectively restore ONLY internal Docker DNS resolution
-if [ -n "$DOCKER_DNS_RULES" ]; then
-    echo "Restoring Docker DNS rules..."
-    iptables -t nat -N DOCKER_OUTPUT 2>/dev/null || true
-    iptables -t nat -N DOCKER_POSTROUTING 2>/dev/null || true
-    echo "$DOCKER_DNS_RULES" | xargs -L 1 iptables -t nat
-else
-    echo "No Docker DNS rules to restore"
-fi
+# Flushing rules does NOT reset the chain policies, so a re-run inside a container
+# that is already firewalled would sit on DROP policies with every ACCEPT rule just
+# deleted — no egress at all. The GitHub fetch below would then fail and this
+# script would exit half-applied, leaving the container with no working network
+# until it is recreated. Reset the policies explicitly; they go back to DROP at the
+# end, once the allow rules are in place.
+iptables -P INPUT ACCEPT
+iptables -P OUTPUT ACCEPT
+iptables -P FORWARD ACCEPT
 
 # First allow DNS and localhost before any restrictions
 # Allow outbound DNS
@@ -87,11 +73,11 @@ iptables -A INPUT -p tcp --sport 22 -m state --state ESTABLISHED -j ACCEPT
 iptables -A INPUT -i lo -j ACCEPT
 iptables -A OUTPUT -o lo -j ACCEPT
 
-# --- Project-specific inbound ports (from ports.conf) ---
-for port in "${OPEN_PORTS[@]}"; do
-    echo "Allowing inbound TCP port $port"
-    iptables -A INPUT -p tcp --dport "$port" -j ACCEPT
-done
+# Inbound ports need no rules of their own. The application under development runs
+# on the host, not in here, and the directly-connected subnets allowed below cover
+# everything that legitimately reaches this container. Exposing a port from the
+# container to a host browser is a `ports:` entry in docker-compose.override.yml;
+# the firewall does not stand in the way of it.
 
 # Create ipset with CIDR support (maxelem increased for CloudFront ranges)
 ipset create allowed-domains hash:net maxelem 65536
@@ -107,63 +93,59 @@ fi
 
 echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | aggregate -q | add_cidrs "GitHub"
 
-# Resolve domains from config (user-owned domains.conf)
-CONF="/usr/local/bin/domains.conf"
-
-if [[ -f "$CONF" ]]; then
+# Resolve domains from two config files: the template's baseline, which updates keep
+# current, and the project's own additions, which they never touch.
+for CONF in /usr/local/bin/domains-base.conf /usr/local/bin/domains.conf; do
+    [[ -f "$CONF" ]] || continue
     while IFS= read -r domain; do
         [[ -z "$domain" || "$domain" =~ ^# ]] && continue
         domain=$(echo "$domain" | xargs)
         ips=$(dig +short "$domain" 2>/dev/null | grep -E '^[0-9]+\.' || true)
+        if [[ -z "$ips" ]]; then
+            echo "WARNING: $domain (from $(basename "$CONF")) did not resolve — not allowed"
+            continue
+        fi
         for ip in $ips; do
             ipset add allowed-domains "$ip" -exist
         done
     done < "$CONF"
-fi
+done
 
-# Get host IP from default route
-HOST_IP=$(ip route | grep default | cut -d" " -f3)
-if [ -z "$HOST_IP" ]; then
-    echo "ERROR: Failed to detect host IP"
+# Allow every subnet this container is directly attached to. That covers the path
+# to the host — where the application under development normally runs — and any
+# sibling compose containers.
+#
+# Read from the routing table rather than guessed. The previous version did both:
+# it turned the default gateway into a /24 (right only when the gateway's prefix
+# happens to be /24) and grepped the routes for 172.x (matching nothing at all on
+# runtimes that use another range, e.g. OrbStack's 192.168.x). Where it worked, it
+# worked by coincidence.
+LINK_NETS=$(ip -4 route show scope link | awk '$1 ~ /\// && $1 !~ /^169\.254\./ {print $1}' | sort -u)
+if [ -z "$LINK_NETS" ]; then
+    echo "ERROR: no directly-connected IPv4 subnets found — cannot reach the host"
     exit 1
 fi
-
-HOST_NETWORK=$(echo "$HOST_IP" | sed "s/\.[0-9]*$/.0\/24/")
-echo "Host network detected as: $HOST_NETWORK"
-
-# Set up remaining iptables rules
-iptables -A INPUT -s "$HOST_NETWORK" -j ACCEPT
-iptables -A OUTPUT -d "$HOST_NETWORK" -j ACCEPT
-
-# Allow traffic to Docker Compose internal networks (for DB and other services)
-# Docker Compose typically uses 172.x.0.0/16 ranges for internal networks
-for net in $(ip route | grep -oP '172\.\d+\.\d+\.\d+/\d+'); do
-    echo "Allowing Docker internal network: $net"
+for net in $LINK_NETS; do
+    echo "Allowing directly-connected network: $net"
     iptables -A INPUT -s "$net" -j ACCEPT
     iptables -A OUTPUT -d "$net" -j ACCEPT
 done
 
-# Forward localhost:PORT connections to docker-compose service containers, so
-# app config can keep using localhost:PORT both natively and inside the
-# devcontainer.
-echo "Configuring localhost port forwarding to service containers..."
-
-# PORT_FORWARDS comes from ports.conf; entries are
-# "<local_port> <service_name> <service_port>".
-for entry in "${PORT_FORWARDS[@]}"; do
-    IFS=' ' read -r local_port service_host service_port <<<"$entry"
-    service_ip=$(getent hosts "$service_host" | awk '{print $1}' | head -1)
-    if [ -z "$service_ip" ]; then
-        echo "ERROR: Failed to resolve service host $service_host"
-        exit 1
-    fi
-    echo "Forwarding localhost:$local_port -> $service_host ($service_ip):$service_port"
-    iptables -t nat -A OUTPUT -p tcp -d 127.0.0.1 --dport "$local_port" \
-        -j DNAT --to-destination "$service_ip:$service_port"
-    # MASQUERADE the source so the service's reply returns to this container
-    # instead of being sent to 127.0.0.1 on the service host.
-    iptables -t nat -A POSTROUTING -p tcp -d "$service_ip" --dport "$service_port" \
-        -j MASQUERADE
+# The host itself, under the names the runtime publishes for it. This is the whole
+# point of the sandbox as used here: the application under development runs on the
+# host, and the container has to reach it.
+#
+# A directly-connected subnet is not enough. OrbStack answers host.docker.internal
+# with an address outside every route (0.250.250.254), so without an explicit rule
+# the host is unreachable — as it was until this rule existed. Nothing is assumed
+# about the address: whatever the names resolve to is what gets allowed, and a name
+# that does not resolve is skipped.
+for host_alias in host.docker.internal gateway.docker.internal host.internal; do
+    for ip in $(dig +short "$host_alias" 2>/dev/null | grep -E '^[0-9]+\.' || true); do
+        echo "Allowing host address $ip ($host_alias)"
+        iptables -A OUTPUT -d "$ip" -j ACCEPT
+        iptables -A INPUT -s "$ip" -j ACCEPT
+    done
 done
 
 # Set default policies to DROP first

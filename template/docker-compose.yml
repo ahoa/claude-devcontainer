@@ -9,12 +9,9 @@ services:
   devcontainer:
     build:
       # Context is .devcontainer/ so the build can read the user-owned files that
-      # sit beside this hidden directory (tools.sh, domains.conf, ports.conf).
+      # sit beside this hidden directory (tools.sh, domains.conf).
       context: ..
       dockerfile: .template/Dockerfile
-    sysctls:
-      # Required so init-firewall.sh can DNAT localhost:PORT to service containers.
-      - net.ipv4.conf.all.route_localnet=1
     cap_add:
       - NET_ADMIN
       - NET_RAW

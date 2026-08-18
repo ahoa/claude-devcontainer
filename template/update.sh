@@ -6,10 +6,9 @@
 # update.sh — pull a newer version of the devcontainer template into this project.
 #
 # Updating is just a re-run of the installer at a newer commit: it rewrites
-# .template/ and the scripts beside it, and leaves the four visible user-owned
-# files (tools.sh, domains.conf, ports.conf, docker-compose.override.yml) exactly
-# as they are. That split is what makes an update safe, so there is nothing to
-# merge here.
+# .template/ and the scripts beside it, and leaves the three visible user-owned
+# files (tools.sh, domains.conf, docker-compose.override.yml) exactly as they are.
+# That split is what makes an update safe, so there is nothing to merge here.
 #
 #   ./update.sh            update to the latest commit on the recorded ref
 #   ./update.sh --check    report whether an update exists (used by start.sh)
@@ -156,9 +155,9 @@ if [[ $FORCE -ne 1 ]]; then
 fi
 
 # ── Re-run the installer at the target commit ───────────────────────────────
-# A pre-split install's toolchain and ports are lifted into the user-owned files
-# by the installer itself (it recognises the old layout by the missing stamp), so
-# there is nothing to do for that here.
+# A pre-split install's toolchain is lifted into the user-owned files by the
+# installer itself (it recognises the old layout by the missing stamp), so there is
+# nothing to do for that here.
 # Pinned to the resolved SHA rather than the ref, so what gets installed is
 # exactly what was compared against — and is what the new stamp will record.
 TMP="$(mktemp -d)"

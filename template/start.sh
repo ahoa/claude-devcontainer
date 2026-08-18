@@ -62,10 +62,10 @@ BUILD_INPUTS=(
     "$TEMPLATE_DIR/docker-compose.yml"
     "$TEMPLATE_DIR/tmux.conf"
     "$TEMPLATE_DIR/init-firewall.sh"
+    "$TEMPLATE_DIR/domains-base.conf"
     "$TEMPLATE_DIR/devcontainer.json"
     "$SCRIPT_DIR/tools.sh"
     "$SCRIPT_DIR/domains.conf"
-    "$SCRIPT_DIR/ports.conf"
     "$SCRIPT_DIR/docker-compose.override.yml"
 )
 BUILD_HASH="$(cat "${BUILD_INPUTS[@]}" 2>/dev/null | sha256sum | cut -d' ' -f1)"

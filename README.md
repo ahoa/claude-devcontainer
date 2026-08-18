@@ -12,8 +12,7 @@ Running `install.sh` writes this into your project:
 .devcontainer/
 ├── tools.sh                     ← yours: project toolchain
 ├── domains.conf                 ← yours: extra outbound hosts
-├── ports.conf                   ← yours: inbound and forwarded ports
-├── docker-compose.override.yml  ← yours: extra services
+├── docker-compose.override.yml  ← yours: compose additions
 │
 ├── start.sh                     the commands you run
 ├── attach.sh
@@ -28,8 +27,8 @@ Running `install.sh` writes this into your project:
     └── tmux.conf
 ```
 
-**The four files at the top are yours.** They are created once and never
-overwritten, so a template update cannot touch them. The three scripts are the
+**The three files at the top are yours.** They are created once and never
+overwritten, so a template update cannot touch them. Below them sit the three
 commands you run. Everything else is machinery: it says `DO NOT CHANGE THIS FILE`
 at the top, is replaced on update, and lives out of sight in `.template/`.
 
@@ -44,8 +43,13 @@ Yours:
 |------|---------|
 | `tools.sh` | Your project's toolchain (Node, JDK, Python, …). Plain shell, run as root at image build time with full network. |
 | `domains.conf` | Extra outbound hosts, one per line. |
-| `ports.conf` | `OPEN_PORTS` (inbound dev-server ports) and `PORT_FORWARDS` (localhost:PORT → compose service). |
 | `docker-compose.override.yml` | Extra services, ports, env and volumes, merged on top of the template's compose file. |
+
+The application under development is meant to run on the **host**, not in the
+container: the container is where Claude edits and builds the code. Nothing needs
+configuring for that — reach the host at `host.docker.internal` (the firewall
+resolves and allows whatever the runtime publishes that name as), and a sibling
+compose service by its service name.
 
 The template's:
 
@@ -53,7 +57,8 @@ The template's:
 |------|---------|
 | `.template/Dockerfile` | Minimal Debian base: `git`, `zsh`, `tmux`, firewall tooling, a `dev` user, the timezone you picked, and Claude's config baked to a persisted path. **No language runtimes** — those go in `tools.sh`. |
 | `.template/docker-compose.yml` | The devcontainer service, plus the `claude-shared` volume (Claude login/config, one volume shared by **all** projects — log in once, every devcontainer is authenticated). |
-| `.template/init-firewall.sh` | Runtime egress firewall — default-deny outbound, allowing only GitHub, Anthropic, npm, Docker Hub, and what you add. |
+| `.template/init-firewall.sh` | Runtime egress firewall — default-deny outbound, allowing only what the two host lists resolve to, plus the dynamically fetched GitHub ranges. |
+| `.template/domains-base.conf` | The baseline hosts every devcontainer needs (Anthropic, npm, Docker Hub, `fm.codeborne.com`). Template-owned so updates can extend it. |
 | `.template/tmux.conf` | `Ctrl-a` prefix, mouse, big scrollback, truecolor, OSC 52 clipboard, vi copy mode. |
 | `.template/devcontainer.json` | Wires in the `common-utils`, Claude, and `docker-outside-of-docker` features; merges `docker-compose.override.yml`; runs the firewall on start. |
 | `.template/devcontainer-lock.json` | Pins the three features by digest. Has to sit beside `devcontainer.json`. |
@@ -126,18 +131,28 @@ curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh \
 
 ## After installing
 
-The base image is intentionally empty of language runtimes. Customise — all four
+The base image is intentionally empty of language runtimes. Customise — all three
 files survive template updates:
 
 - **Toolchain** — write plain shell into `.devcontainer/tools.sh` (Node, JDK,
   Python, …). It runs as root at build time, where the network is unrestricted;
   the firewall only applies at runtime.
 - **Outbound hosts** — add domains to `.devcontainer/domains.conf` (one host per
-  line). GitHub ranges are already fetched dynamically.
-- **Dev-server ports** — set `OPEN_PORTS=(3000 5173)` in
-  `.devcontainer/ports.conf` to let a host browser reach your dev server;
-  `PORT_FORWARDS=("5432 db 5432")` maps `localhost:5432` inside the container to
-  a compose service.
+  line). Only what your project adds: the baseline (Anthropic, npm, Docker Hub,
+  `fm.codeborne.com`) lives in `.template/domains-base.conf`, and GitHub ranges are
+  fetched dynamically. The baseline sits on the template's side of the split on
+  purpose — a host added to it reaches existing projects on their next update,
+  whereas `domains.conf` is frozen the moment a project is installed.
+- **Ports** — nothing to configure. The app runs on the host and the container
+  reaches it at `host.docker.internal:PORT`. If you do want to expose something
+  *from* the container, publish it in the override:
+
+  ```yaml
+  services:
+    devcontainer:
+      ports:
+        - "5173:5173"
+  ```
 - **Extra services** — add them to `.devcontainer/docker-compose.override.yml`,
   which is merged on top of the template's compose file. Mind that relative paths
   there resolve against `.template/`, since that is where the base compose file
@@ -211,19 +226,21 @@ Seeing no stamp, the installer recognises the old layout, moves the machinery in
 `.template/`, and rescues what used to live in template-owned files before
 replacing them:
 
-- `OPEN_PORTS` and `PORT_FORWARDS` are lifted out of `init-firewall.sh` into a new
-  `ports.conf`, multi-line arrays included. Nothing to do.
+- `PORT_FORWARDS` and `OPEN_PORTS` are gone; the installer reports what yours held
+  and what replaces it. Reach sibling services by name (`db:5432`), and publish a
+  port in the override if you need it exposed.
 - `allowed-domains.conf` is renamed to `domains.conf`, entries untouched. Nothing
-  to do.
+  to do — though it will still hold the baseline hosts that now also live in
+  `.template/domains-base.conf`. The duplicates are harmless; trim them if you
+  like.
 - Toolchain lines found in the `Dockerfile` are saved verbatim to
   `tools.from-dockerfile`. **Manual**: they are Dockerfile syntax, not shell, so
   move them into `tools.sh` yourself (drop the leading `RUN `) and delete the
   `.from-dockerfile` file. Until you do, the image builds without your toolchain.
 - If the old `docker-compose.yml` defined services beyond `devcontainer`, it is
   copied to `docker-compose.from-old.yml`. **Manual**: move those services into
-  `docker-compose.override.yml`. Do this *before* starting — if `ports.conf` forwards a port
-  to a service that no longer exists, the firewall aborts and the container will
-  not start at all.
+  `docker-compose.override.yml`. Anything referring to those services by name will
+  not resolve until you do.
 
 The installer prints a warning for each manual step. Afterwards the project has
 `update.sh` and a stamp, and every later update is a single

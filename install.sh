@@ -38,6 +38,7 @@ HIDDEN_FILES=(
     Dockerfile
     docker-compose.yml
     init-firewall.sh
+    domains-base.conf
     tmux.conf
 )
 # Template-owned but visible, because these three are the commands you run. They
@@ -59,7 +60,6 @@ MACHINERY_FILES=("${HIDDEN_FILES[@]}" "${VISIBLE_TEMPLATE_FILES[@]}")
 USER_FILES=(
     tools.sh
     domains.conf
-    ports.conf
     docker-compose.override.yml
 )
 # All files the template must provide (used to detect a complete template dir).
@@ -299,15 +299,18 @@ list_conflicts() {
 migrate_pre_split_config() {
     [[ -d "$DEST" && ! -f "$DEST/.template-version" ]] || return 0
 
-    # Ports are shell arrays either way, so they can be moved verbatim.
-    if [[ ! -f "$DEST/ports.conf" && -f "$DEST/init-firewall.sh" ]] \
-       && grep -q '^OPEN_PORTS=(' "$DEST/init-firewall.sh"; then
-        {
-            echo "# Lifted out of init-firewall.sh by install.sh — ports live here now."
-            awk '/^OPEN_PORTS=\(/,/\)/'    "$DEST/init-firewall.sh"
-            awk '/^PORT_FORWARDS=\(/,/\)/' "$DEST/init-firewall.sh"
-        } > "$DEST/ports.conf"
-        echo "→ Lifted OPEN_PORTS / PORT_FORWARDS out of init-firewall.sh into ports.conf"
+    # Neither of the old port arrays is carried over: nothing reads them any more.
+    # OPEN_PORTS never was what made a port reachable (the firewall accepts the
+    # directly-connected subnets wholesale), and PORT_FORWARDS existed to fake
+    # localhost:PORT for a sibling service — which compose already answers with a
+    # service name. Both are reported instead of copied, so a project that used them
+    # is told what replaces them rather than left with config nothing honours.
+    local old_ports
+    old_ports="$(sed -n 's/^OPEN_PORTS=(\(.*\))/\1/p' "$DEST/init-firewall.sh" 2>/dev/null | head -1)"
+    [[ -n "${old_ports// /}" ]] && MIGRATED_OPEN_PORTS="$old_ports"
+    if grep -q '^PORT_FORWARDS=($' "$DEST/init-firewall.sh" 2>/dev/null \
+       && awk '/^PORT_FORWARDS=\(/,/\)/' "$DEST/init-firewall.sh" | grep -q '"'; then
+        MIGRATED_FORWARDS=1
     fi
 
     # The host list keeps its format and only changes name.
@@ -467,6 +470,8 @@ fi
 # held them. No-op on fresh installs and on anything already carrying a stamp.
 MIGRATED_TOOLCHAIN=0
 MIGRATED_COMPOSE=0
+MIGRATED_OPEN_PORTS=""
+MIGRATED_FORWARDS=0
 migrate_pre_split_config
 
 mkdir -p "$DEST/$TEMPLATE_SUBDIR"
@@ -544,6 +549,32 @@ if [[ $MIGRATED_TOOLCHAIN -eq 1 ]]; then
 EOF
 fi
 
+if [[ -n "$MIGRATED_OPEN_PORTS" ]]; then
+    cat <<EOF
+
+ℹ  Your old init-firewall.sh listed OPEN_PORTS=($MIGRATED_OPEN_PORTS). That array is
+   gone: the firewall accepts the container's directly-connected subnets wholesale,
+   so it never was what made those ports reachable. Publishing them is:
+
+     # $DEST/docker-compose.override.yml
+     services:
+       devcontainer:
+         ports:
+$(for p in $MIGRATED_OPEN_PORTS; do printf '           - "%s:%s"\n' "$p" "$p"; done)
+EOF
+fi
+
+if [[ $MIGRATED_FORWARDS -eq 1 ]]; then
+    cat <<EOF
+
+ℹ  Your old init-firewall.sh had PORT_FORWARDS entries. That mechanism is gone —
+   it DNAT-ed localhost:PORT to a sibling service, which compose answers directly:
+   reach the service by its name (db:5432) instead. If some config cannot be moved
+   off localhost, give that service the devcontainer's network namespace with
+   network_mode: "service:devcontainer" in docker-compose.override.yml.
+EOF
+fi
+
 if [[ $MIGRATED_COMPOSE -eq 1 ]]; then
     cat <<EOF
 
@@ -551,21 +582,19 @@ if [[ $MIGRATED_COMPOSE -eq 1 ]]; then
    install replaced that file. A copy is in $DEST/docker-compose.from-old.yml.
    Move those service definitions into $DEST/docker-compose.override.yml,
    then delete the .from-old.yml file.
-   Do this before starting: if ports.conf forwards a port to a service that no
-   longer exists, the firewall aborts and the container will not start.
+   Anything that referred to those services by name will not resolve until you do.
 EOF
 fi
 
 cat <<EOF
 
-The four files at the top of $DEST are yours to edit;
+The three files at the top of $DEST are yours to edit;
 everything else there, including $TEMPLATE_SUBDIR/, is the template's and is
 replaced on update.
 
 Next:
   1. Add your project's toolchain to $DEST/tools.sh (Node/JDK/Python/…).
-  2. Add any extra outbound hosts to $DEST/domains.conf, and
-     dev-server / forwarded ports to $DEST/ports.conf.
+  2. Add any extra outbound hosts to $DEST/domains.conf.
   3. Extra compose services go in $DEST/docker-compose.override.yml.
   4. Start it:   (cd "$TARGET_DIR" && ./.devcontainer/start.sh)
      Re-attach:  (cd "$TARGET_DIR" && ./.devcontainer/attach.sh)
