@@ -1,3 +1,12 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# DO NOT CHANGE THIS FILE. It belongs to the devcontainer template and is
+# overwritten whenever the template is updated. Your project's settings go in the
+# visible files one level up: tools.sh (toolchain), domains.conf (outbound hosts),
+# ports.conf (inbound/forwarded ports), compose-extra.yml (extra services).
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Build context is .devcontainer/, not .devcontainer/.template/, so this file can
+# COPY the user-owned files that sit beside the hidden directory.
 FROM debian:13.4-slim
 
 # Core tools + the firewall toolchain (iptables/ipset/aggregate/dig/jq are all
@@ -34,7 +43,7 @@ ENV CLAUDE_CONFIG_DIR=/home/dev/.claude
 RUN mkdir -p /home/dev/.claude && chown dev:dev /home/dev/.claude
 
 # tmux config (Ctrl-a prefix etc.) for the `dev` user.
-COPY --chown=dev:dev tmux.conf /home/dev/.tmux.conf
+COPY --chown=dev:dev .template/tmux.conf /home/dev/.tmux.conf
 
 # Default shell zsh instead of sh.
 ENV SHELL=/bin/zsh
@@ -66,19 +75,19 @@ RUN git config --global core.checkStat minimal && \
 # Firewall script + its two config files (outbound hosts, inbound/forwarded
 # ports). Build-time has full network; the firewall only applies at container
 # runtime via postStartCommand.
-COPY init-firewall.sh /usr/local/bin/
-COPY allowed-domains.conf /usr/local/bin/
-COPY firewall-ports.conf /usr/local/bin/
+COPY .template/init-firewall.sh /usr/local/bin/
+COPY domains.conf /usr/local/bin/
+COPY ports.conf /usr/local/bin/
 RUN chmod +x /usr/local/bin/init-firewall.sh && \
     echo "dev ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh" > /etc/sudoers.d/init-firewall && \
     chmod 0440 /etc/sudoers.d/init-firewall
 
-# Project toolchain (Node, JDK, Python, …). It lives in install-tools.sh rather
-# than in RUN lines here, because this Dockerfile belongs to the template and is
-# overwritten on update, while install-tools.sh is yours and is not. Kept last so
-# editing it invalidates no earlier layer, and dropped afterwards so the image
-# does not ship the script itself.
-COPY install-tools.sh /tmp/install-tools.sh
-RUN chmod +x /tmp/install-tools.sh && /tmp/install-tools.sh && rm -f /tmp/install-tools.sh
+# Project toolchain (Node, JDK, Python, …). It lives in tools.sh rather than in
+# RUN lines here, because this Dockerfile belongs to the template and is
+# overwritten on update, while tools.sh is yours and is not. Kept last so editing
+# it invalidates no earlier layer, and dropped afterwards so the image does not
+# ship the script itself.
+COPY tools.sh /tmp/tools.sh
+RUN chmod +x /tmp/tools.sh && /tmp/tools.sh && rm -f /tmp/tools.sh
 
 WORKDIR /workspace

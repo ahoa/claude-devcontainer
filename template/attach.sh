@@ -1,8 +1,14 @@
 #!/bin/bash
+#
+# DO NOT CHANGE THIS FILE. It belongs to the devcontainer template and is
+# overwritten whenever the template is updated. It stays visible because you run
+# it; the machinery it drives is in .template/.
+#
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+TEMPLATE_DIR="$SCRIPT_DIR/.template"
 
 # Number of tmux windows to open on first session creation (each runs its own
 # Claude). Set at install time; override at run time with TMUX_WINDOWS=N.
@@ -11,7 +17,7 @@ WINDOWS="${TMUX_WINDOWS:-__TMUX_WINDOWS__}"
 # Pin the compose project name from docker-compose.yml's top-level `name:` so
 # `devcontainer exec` looks up the container under the same project name that
 # `start.sh`'s `devcontainer up` created it under. See start.sh for details.
-COMPOSE_PROJECT_NAME="$(awk -F': *' '/^name:/{print $2; exit}' "$SCRIPT_DIR/docker-compose.yml")"
+COMPOSE_PROJECT_NAME="$(awk -F': *' '/^name:/{print $2; exit}' "$TEMPLATE_DIR/docker-compose.yml")"
 export COMPOSE_PROJECT_NAME
 
 # Args (any order):

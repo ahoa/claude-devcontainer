@@ -1,8 +1,15 @@
 #!/bin/bash
+#
+# DO NOT CHANGE THIS FILE. It belongs to the devcontainer template and is
+# overwritten whenever the template is updated. It stays visible because you run
+# it; the machinery it drives is in .template/.
+#
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Template-owned files nobody should be editing by hand.
+TEMPLATE_DIR="$SCRIPT_DIR/.template"
 
 # Number of tmux windows to open on first session creation (each runs its own
 # Claude). Set at install time; override at run time with TMUX_WINDOWS=N.
@@ -14,7 +21,7 @@ WINDOWS="${TMUX_WINDOWS:-__TMUX_WINDOWS__}"
 # ${folder}_devcontainer), so exec can't find the container `up` created.
 # Exporting COMPOSE_PROJECT_NAME forces up, exec, and plain `docker compose up`
 # to agree on a single name.
-COMPOSE_PROJECT_NAME="$(awk -F': *' '/^name:/{print $2; exit}' "$SCRIPT_DIR/docker-compose.yml")"
+COMPOSE_PROJECT_NAME="$(awk -F': *' '/^name:/{print $2; exit}' "$TEMPLATE_DIR/docker-compose.yml")"
 export COMPOSE_PROJECT_NAME
 
 # Args (any order):
@@ -51,15 +58,15 @@ fi
 # inputs ourselves and pass `--remove-existing-container` whenever they differ
 # from the last successful run (or on first run, when no marker exists).
 BUILD_INPUTS=(
-    "$SCRIPT_DIR/Dockerfile"
-    "$SCRIPT_DIR/docker-compose.yml"
-    "$SCRIPT_DIR/docker-compose.override.yml"
+    "$TEMPLATE_DIR/Dockerfile"
+    "$TEMPLATE_DIR/docker-compose.yml"
+    "$TEMPLATE_DIR/tmux.conf"
+    "$TEMPLATE_DIR/init-firewall.sh"
     "$SCRIPT_DIR/devcontainer.json"
-    "$SCRIPT_DIR/tmux.conf"
-    "$SCRIPT_DIR/init-firewall.sh"
-    "$SCRIPT_DIR/allowed-domains.conf"
-    "$SCRIPT_DIR/firewall-ports.conf"
-    "$SCRIPT_DIR/install-tools.sh"
+    "$SCRIPT_DIR/tools.sh"
+    "$SCRIPT_DIR/domains.conf"
+    "$SCRIPT_DIR/ports.conf"
+    "$SCRIPT_DIR/docker-compose.override.yml"
 )
 BUILD_HASH="$(cat "${BUILD_INPUTS[@]}" 2>/dev/null | sha256sum | cut -d' ' -f1)"
 HASH_FILE="$SCRIPT_DIR/.build-hash"

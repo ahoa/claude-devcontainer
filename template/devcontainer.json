@@ -1,7 +1,16 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// DO NOT CHANGE THIS FILE. It belongs to the devcontainer template and is
+// overwritten whenever the template is updated. Your project's settings go in
+// tools.sh, domains.conf, ports.conf and docker-compose.override.yml.
+//
+// This file has to sit at exactly .devcontainer/devcontainer.json for VS Code and
+// the devcontainer CLI to find it, so unlike the rest of the machinery it cannot
+// move into .template/.
+// ─────────────────────────────────────────────────────────────────────────────
 {
   "name": "__PROJECT_NAME__",
   "dockerComposeFile": [
-    "docker-compose.yml",
+    ".template/docker-compose.yml",
     "docker-compose.override.yml"
   ],
   "service": "devcontainer",

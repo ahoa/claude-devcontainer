@@ -1,12 +1,15 @@
 #!/bin/bash
 #
+# DO NOT CHANGE THIS FILE. It belongs to the devcontainer template and is
+# overwritten whenever the template is updated (by itself, among other things).
+#
 # update.sh — pull a newer version of the devcontainer template into this project.
 #
-# Updating is just a re-run of the installer at a newer commit: it rewrites the
-# template-owned files and leaves the user-owned ones (install-tools.sh,
-# allowed-domains.conf, firewall-ports.conf, docker-compose.override.yml) exactly
-# as they are. That split is what makes an update safe, so there is no merging to
-# do here.
+# Updating is just a re-run of the installer at a newer commit: it rewrites
+# .template/ and the scripts beside it, and leaves the four visible user-owned
+# files (tools.sh, domains.conf, ports.conf, docker-compose.override.yml) exactly
+# as they are. That split is what makes an update safe, so there is nothing to
+# merge here.
 #
 #   ./update.sh            update to the latest commit on the recorded ref
 #   ./update.sh --check    report whether an update exists (used by start.sh)
@@ -56,14 +59,25 @@ fi
 
 # A pre-stamp install still knows its answers — they are substituted into the
 # installed files, so read them back rather than asking again.
+#
+# The machinery moved into .template/ at some point; a project that has not
+# updated since still has it flat in .devcontainer/, so look in both places.
+find_machinery() {
+    local f
+    for f in "$SCRIPT_DIR/.template/$1" "$SCRIPT_DIR/$1"; do
+        [[ -f "$f" ]] && { echo "$f"; return 0; }
+    done
+    return 1
+}
+
 if [[ -z "$PROJECT_NAME" ]]; then
-    PROJECT_NAME="$(awk -F': *' '/^name:/{print $2; exit}' "$SCRIPT_DIR/docker-compose.yml" 2>/dev/null || true)"
+    PROJECT_NAME="$(awk -F': *' '/^name:/{print $2; exit}' "$(find_machinery docker-compose.yml)" 2>/dev/null || true)"
 fi
 if [[ -z "$TMUX_WINDOWS" ]]; then
     TMUX_WINDOWS="$(sed -n 's/^WINDOWS="\${TMUX_WINDOWS:-\([0-9]*\)}".*/\1/p' "$SCRIPT_DIR/start.sh" 2>/dev/null | head -1)"
 fi
 if [[ -z "$TIMEZONE" ]]; then
-    TIMEZONE="$(sed -n 's/^ENV TZ=\(.*\)/\1/p' "$SCRIPT_DIR/Dockerfile" 2>/dev/null | head -1)"
+    TIMEZONE="$(sed -n 's/^ENV TZ=\(.*\)/\1/p' "$(find_machinery Dockerfile)" 2>/dev/null | head -1)"
 fi
 [[ -z "$PROJECT_NAME" ]] && { echo "ERROR: cannot determine the project name — is $SCRIPT_DIR a devcontainer install?" >&2; exit 1; }
 TMUX_WINDOWS="${TMUX_WINDOWS:-1}"

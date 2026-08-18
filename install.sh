@@ -29,32 +29,45 @@ REPO_REF="${CLAUDE_DEVCONTAINER_REF:-main}"
 # it compared against) while the project should go on tracking the branch.
 TRACK_REF="${CLAUDE_DEVCONTAINER_TRACK_REF:-$REPO_REF}"
 
-# Template-owned files: always (re)written, so a re-run picks up template changes.
-MACHINERY_FILES=(
+# Template-owned machinery, installed into .devcontainer/.template/ — out of sight
+# because nothing in it is meant to be edited by hand. Always (re)written, so a
+# re-run picks up template changes.
+HIDDEN_FILES=(
     Dockerfile
-    devcontainer.json
-    devcontainer-lock.json
     docker-compose.yml
     init-firewall.sh
     tmux.conf
+)
+# Template-owned but visible, for two different reasons: the three scripts are the
+# commands you actually run, and the two devcontainer files have to sit at exactly
+# .devcontainer/devcontainer.json (with its lock beside it) for VS Code and the
+# devcontainer CLI to find them. Also always (re)written.
+VISIBLE_TEMPLATE_FILES=(
+    devcontainer.json
+    devcontainer-lock.json
     start.sh
     attach.sh
     update.sh
 )
+MACHINERY_FILES=("${HIDDEN_FILES[@]}" "${VISIBLE_TEMPLATE_FILES[@]}")
 # User-owned files: seeded once and never overwritten, so a re-run cannot clobber
 # a project's toolchain, ports, outbound hosts or compose additions. Everything a
 # project needs to customise must live in one of these — that is what makes
 # re-running the installer a safe update.
+# They stay at the top of .devcontainer/, so what is visible there is what you are
+# meant to touch.
 USER_FILES=(
-    install-tools.sh
-    allowed-domains.conf
-    firewall-ports.conf
+    tools.sh
+    domains.conf
+    ports.conf
     docker-compose.override.yml
 )
 # All files the template must provide (used to detect a complete template dir).
 TEMPLATE_FILES=("${MACHINERY_FILES[@]}" "${USER_FILES[@]}")
-# Files that get the executable bit.
-EXECUTABLE_FILES=(start.sh attach.sh update.sh init-firewall.sh install-tools.sh)
+# Files that get the executable bit, as installed paths.
+EXECUTABLE_FILES=(start.sh attach.sh update.sh .template/init-firewall.sh tools.sh)
+# Where the hidden machinery goes, relative to .devcontainer/.
+TEMPLATE_SUBDIR=".template"
 
 usage() {
     cat <<'EOF'
@@ -203,6 +216,16 @@ is_user_file() {
     return 1
 }
 
+# Where a template file is installed: machinery is tucked into .template/,
+# everything else sits at the top of .devcontainer/ where it can be seen.
+dest_path() {
+    local f
+    for f in "${HIDDEN_FILES[@]}"; do
+        [[ "$f" == "$1" ]] && { echo "$DEST/$TEMPLATE_SUBDIR/$1"; return 0; }
+    done
+    echo "$DEST/$1"
+}
+
 # Which template commit this install came from — recorded in .devcontainer/ so
 # update.sh knows what to compare against. Prints a short SHA, or nothing when it
 # cannot be established.
@@ -247,12 +270,12 @@ list_conflicts() {
     if docker compose ls --all 2>/dev/null | awk 'NR>1{print $1}' | grep -qx "$n"; then
         echo "  - docker compose project '$n'"; found=1
     fi
-    # The named volume this template would create (<project>_ssh). The Claude
-    # login/config volume is NOT checked: it has a fixed name (claude-shared)
-    # shared across all projects, so an existing one is expected, not a conflict.
-    if docker volume ls --format '{{.Name}}' 2>/dev/null | grep -qx "${n}_ssh"; then
-        echo "  - docker volume '${n}_ssh'"; found=1
-    fi
+    # The Claude login/config volume is deliberately NOT checked: it has a fixed
+    # name (claude-shared) shared across all projects, so an existing one is
+    # expected, not a conflict. The compose file declares no per-project volumes of
+    # its own (the Claude devcontainer feature does create one, named after the
+    # compose project, but it is disposable and reappears on the next `up`).
+    #
     # The image compose derives for the devcontainer service (<project>-devcontainer).
     local img
     while IFS= read -r img; do
@@ -277,14 +300,37 @@ migrate_pre_split_config() {
     [[ -d "$DEST" && ! -f "$DEST/.template-version" ]] || return 0
 
     # Ports are shell arrays either way, so they can be moved verbatim.
-    if [[ ! -f "$DEST/firewall-ports.conf" && -f "$DEST/init-firewall.sh" ]] \
+    if [[ ! -f "$DEST/ports.conf" && -f "$DEST/init-firewall.sh" ]] \
        && grep -q '^OPEN_PORTS=(' "$DEST/init-firewall.sh"; then
         {
             echo "# Lifted out of init-firewall.sh by install.sh — ports live here now."
             awk '/^OPEN_PORTS=\(/,/\)/'    "$DEST/init-firewall.sh"
             awk '/^PORT_FORWARDS=\(/,/\)/' "$DEST/init-firewall.sh"
-        } > "$DEST/firewall-ports.conf"
-        echo "→ Lifted OPEN_PORTS / PORT_FORWARDS out of init-firewall.sh into firewall-ports.conf"
+        } > "$DEST/ports.conf"
+        echo "→ Lifted OPEN_PORTS / PORT_FORWARDS out of init-firewall.sh into ports.conf"
+    fi
+
+    # The host list keeps its format and only changes name.
+    if [[ ! -f "$DEST/domains.conf" && -f "$DEST/allowed-domains.conf" ]]; then
+        mv "$DEST/allowed-domains.conf" "$DEST/domains.conf"
+        echo "→ Renamed allowed-domains.conf to domains.conf (your entries are untouched)"
+    fi
+
+    # Extra services used to be added straight into docker-compose.yml, which the
+    # template owns and is about to replace. Losing them silently is worse than it
+    # sounds: a PORT_FORWARDS entry pointing at a service that no longer exists
+    # makes init-firewall.sh exit 1, and the container then fails to start at all.
+    if [[ -f "$DEST/docker-compose.yml" ]] && awk '
+        /^services:/ { s=1; next }
+        /^[^ #]/     { s=0 }
+        s && /^  [A-Za-z0-9_.-]+:/ {
+            name=$1; sub(/:$/, "", name)
+            if (name != "devcontainer") found=1
+        }
+        END { exit !found }' "$DEST/docker-compose.yml"; then
+        cp "$DEST/docker-compose.yml" "$DEST/docker-compose.from-old.yml"
+        MIGRATED_COMPOSE=1
+        echo "→ Saved your old docker-compose.yml to docker-compose.from-old.yml (it defines extra services)"
     fi
 
     # The toolchain is Dockerfile syntax, not shell, so it cannot be converted
@@ -293,10 +339,23 @@ migrate_pre_split_config() {
     toolchain="$(awk '/Add your project.s toolchain below/{f=1; next} f' "$DEST/Dockerfile" 2>/dev/null \
                  | grep -vE '^[[:space:]]*#|^[[:space:]]*$|^WORKDIR ' || true)"
     if [[ -n "$toolchain" ]]; then
-        printf '%s\n' "$toolchain" > "$DEST/install-tools.from-dockerfile"
+        printf '%s\n' "$toolchain" > "$DEST/tools.from-dockerfile"
         MIGRATED_TOOLCHAIN=1
-        echo "→ Saved your Dockerfile toolchain lines to install-tools.from-dockerfile"
+        echo "→ Saved your Dockerfile toolchain lines to tools.from-dockerfile"
     fi
+}
+
+# Remove machinery left at the top of .devcontainer/ by an install that predates
+# the move into .template/. Without this the old copies sit beside the new hidden
+# ones — same names, stale contents, no indication which is live.
+clean_stale_machinery() {
+    local f stale=()
+    for f in "${HIDDEN_FILES[@]}"; do
+        [[ -f "$DEST/$f" ]] && stale+=("$f")
+    done
+    [[ ${#stale[@]} -gt 0 ]] || return 0
+    rm -f "${stale[@]/#/$DEST/}"
+    echo "→ Moved ${stale[*]} into $TEMPLATE_SUBDIR/ (they are template-owned)"
 }
 
 # Migrate a pre-shared-login install: older versions of this template gave
@@ -407,26 +466,32 @@ fi
 # Recover a pre-split install's toolchain/ports before overwriting the files that
 # held them. No-op on fresh installs and on anything already carrying a stamp.
 MIGRATED_TOOLCHAIN=0
+MIGRATED_COMPOSE=0
 migrate_pre_split_config
 
-mkdir -p "$DEST"
+mkdir -p "$DEST/$TEMPLATE_SUBDIR"
 KEPT_FILES=()
 for f in "${TEMPLATE_FILES[@]}"; do
+    dest="$(dest_path "$f")"
     # A user-owned file that already exists is left untouched — this is what makes
     # a re-run an update rather than a clobber.
-    if is_user_file "$f" && [[ -e "$DEST/$f" ]]; then
+    if is_user_file "$f" && [[ -e "$dest" ]]; then
         KEPT_FILES+=("$f")
         continue
     fi
-    cp "$TEMPLATE_DIR/$f" "$DEST/$f"
+    cp "$TEMPLATE_DIR/$f" "$dest"
     # Substitute install-time placeholders. -i.bak works on both GNU and BSD sed.
     sed -i.bak \
         -e "s|__PROJECT_NAME__|$PROJECT_NAME|g" \
         -e "s|__TMUX_WINDOWS__|$TMUX_WINDOWS|g" \
         -e "s|__TIMEZONE__|$TIMEZONE|g" \
-        "$DEST/$f"
-    rm -f "$DEST/$f.bak"
+        "$dest"
+    rm -f "$dest.bak"
 done
+
+# Only once the hidden copies are in place, so a failure above leaves the old
+# layout intact rather than a half-installed one.
+clean_stale_machinery
 
 for f in "${EXECUTABLE_FILES[@]}"; do
     chmod +x "$DEST/$f"
@@ -472,19 +537,35 @@ if [[ $MIGRATED_TOOLCHAIN -eq 1 ]]; then
     cat <<EOF
 
 ⚠  Your toolchain used to live in the Dockerfile, which this install replaced.
-   The old lines are in $DEST/install-tools.from-dockerfile.
-   Move them into $DEST/install-tools.sh as plain shell
+   The old lines are in $DEST/tools.from-dockerfile.
+   Move them into $DEST/tools.sh as plain shell
    (drop the leading 'RUN '), then delete the .from-dockerfile file.
    Until you do, the image builds without your toolchain.
 EOF
 fi
 
+if [[ $MIGRATED_COMPOSE -eq 1 ]]; then
+    cat <<EOF
+
+⚠  Your old docker-compose.yml defined services beyond the devcontainer, and this
+   install replaced that file. A copy is in $DEST/docker-compose.from-old.yml.
+   Move those service definitions into $DEST/docker-compose.override.yml,
+   then delete the .from-old.yml file.
+   Do this before starting: if ports.conf forwards a port to a service that no
+   longer exists, the firewall aborts and the container will not start.
+EOF
+fi
+
 cat <<EOF
 
+The four files at the top of $DEST are yours to edit;
+everything else there, including $TEMPLATE_SUBDIR/, is the template's and is
+replaced on update.
+
 Next:
-  1. Add your project's toolchain to $DEST/install-tools.sh (Node/JDK/Python/…).
-  2. Add any extra outbound hosts to $DEST/allowed-domains.conf, and
-     dev-server / forwarded ports to $DEST/firewall-ports.conf.
+  1. Add your project's toolchain to $DEST/tools.sh (Node/JDK/Python/…).
+  2. Add any extra outbound hosts to $DEST/domains.conf, and
+     dev-server / forwarded ports to $DEST/ports.conf.
   3. Extra compose services go in $DEST/docker-compose.override.yml.
   4. Start it:   (cd "$TARGET_DIR" && ./.devcontainer/start.sh)
      Re-attach:  (cd "$TARGET_DIR" && ./.devcontainer/attach.sh)

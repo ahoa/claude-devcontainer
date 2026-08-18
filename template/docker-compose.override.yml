@@ -1,18 +1,27 @@
-# docker-compose.override.yml — your compose customizations.
+# docker-compose.override.yml — your compose additions. EDIT THIS FILE.
 #
-# devcontainer.json lists this file after docker-compose.yml, so compose merges it
-# on top: services, ports, environment and extra volumes belong here rather than in
-# docker-compose.yml, which the template owns and overwrites on update.
+# devcontainer.json lists this file after .template/docker-compose.yml, so compose
+# merges it on top: services, ports, environment and extra volumes belong here
+# rather than in the template's compose file, which is overwritten on update.
 #
-# THIS FILE IS YOURS: the installer creates it once and never overwrites it.
+# This file is yours: the installer creates it once and never overwrites it.
 # Changing it is a build input, so start.sh forces a rebuild on the next run.
 #
-# The empty `devcontainer: {}` below is a valid no-op override — compose needs at
-# least one mapping, and the service's real definition is merged in from
-# docker-compose.yml.
+# Note the name is conventional rather than functional: compose only auto-merges
+# an override file when it is given no -f at all, and then only beside the base
+# file. The devcontainer CLI always passes -f explicitly, so what actually merges
+# this file is the dockerComposeFile list in devcontainer.json.
+#
+# GOTCHA: relative paths here resolve against the FIRST compose file's directory,
+# which is .template/ — not against this file. `./data` means
+# .devcontainer/.template/data. Use `../data` for something in .devcontainer/,
+# `../../data` for the project root, or just give an absolute path.
+#
+# The empty `devcontainer: {}` below is a valid no-op — compose needs at least one
+# mapping, and the service's real definition is merged in from the template's file.
 #
 # Example — a Postgres the devcontainer can reach. Add "5432 db 5432" to
-# PORT_FORWARDS in firewall-ports.conf to also reach it as localhost:5432:
+# PORT_FORWARDS in ports.conf to also reach it as localhost:5432:
 #
 #   services:
 #     db:

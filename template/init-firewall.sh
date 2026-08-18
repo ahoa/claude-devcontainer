@@ -1,14 +1,19 @@
 #!/bin/bash
+#
+# DO NOT CHANGE THIS FILE. It belongs to the devcontainer template and is
+# overwritten whenever the template is updated. The two things a project needs to
+# set are read from ports.conf and domains.conf, which are yours to edit.
+#
 set -euo pipefail  # Exit on error, undefined vars, and pipeline failures
 IFS=$'\n\t'       # Stricter word splitting
 
 echo "=== Initializing container firewall ==="
 
 # --- Project-specific ports (user-owned config) ---
-# OPEN_PORTS and PORT_FORWARDS live in firewall-ports.conf, which the template
-# never overwrites. Defaults are set first, so a missing config file — or one that
+# OPEN_PORTS and PORT_FORWARDS live in ports.conf, which the template never
+# overwrites. Defaults are set first, so a missing config file — or one that
 # defines only one of the two arrays — still leaves this script working.
-PORTS_CONF="/usr/local/bin/firewall-ports.conf"
+PORTS_CONF="/usr/local/bin/ports.conf"
 OPEN_PORTS=()
 PORT_FORWARDS=()
 if [[ -f "$PORTS_CONF" ]]; then
@@ -82,7 +87,7 @@ iptables -A INPUT -p tcp --sport 22 -m state --state ESTABLISHED -j ACCEPT
 iptables -A INPUT -i lo -j ACCEPT
 iptables -A OUTPUT -o lo -j ACCEPT
 
-# --- Project-specific inbound ports (from firewall-ports.conf) ---
+# --- Project-specific inbound ports (from ports.conf) ---
 for port in "${OPEN_PORTS[@]}"; do
     echo "Allowing inbound TCP port $port"
     iptables -A INPUT -p tcp --dport "$port" -j ACCEPT
@@ -102,8 +107,8 @@ fi
 
 echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | aggregate -q | add_cidrs "GitHub"
 
-# Resolve domains from config
-CONF="/usr/local/bin/allowed-domains.conf"
+# Resolve domains from config (user-owned domains.conf)
+CONF="/usr/local/bin/domains.conf"
 
 if [[ -f "$CONF" ]]; then
     while IFS= read -r domain; do
@@ -143,7 +148,7 @@ done
 # devcontainer.
 echo "Configuring localhost port forwarding to service containers..."
 
-# PORT_FORWARDS comes from firewall-ports.conf; entries are
+# PORT_FORWARDS comes from ports.conf; entries are
 # "<local_port> <service_name> <service_port>".
 for entry in "${PORT_FORWARDS[@]}"; do
     IFS=' ' read -r local_port service_host service_port <<<"$entry"

@@ -1,12 +1,17 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# DO NOT CHANGE THIS FILE. It belongs to the devcontainer template and is
+# overwritten whenever the template is updated. Extra services, ports,
+# environment and volumes go in docker-compose.override.yml one level up, which
+# devcontainer.json merges on top of this file.
+# ─────────────────────────────────────────────────────────────────────────────
 name: __PROJECT_NAME__
-# Template-owned: overwritten by a template update. Put project additions —
-# services, ports, environment, extra volumes — in docker-compose.override.yml,
-# which devcontainer.json merges on top of this file and updates never touch.
 services:
   devcontainer:
     build:
-      context: .
-      dockerfile: Dockerfile
+      # Context is .devcontainer/ so the build can read the user-owned files that
+      # sit beside this hidden directory (tools.sh, domains.conf, ports.conf).
+      context: ..
+      dockerfile: .template/Dockerfile
     sysctls:
       # Required so init-firewall.sh can DNAT localhost:PORT to service containers.
       - net.ipv4.conf.all.route_localnet=1
@@ -14,9 +19,8 @@ services:
       - NET_ADMIN
       - NET_RAW
     volumes:
-      - ..:/workspace:cached
-      # Persists an SSH/deploy key across container rebuilds.
-      - ssh:/home/dev/.ssh
+      # Two levels up from .devcontainer/.template/ is the project root.
+      - ../..:/workspace:cached
       # Claude's login token + global config. `claude-shared` is ONE fixed-name
       # volume used by every project installed from this template, so a single
       # /login authenticates all devcontainers. It also survives rebuilds:
@@ -31,7 +35,6 @@ services:
     command: sleep infinity
 
 volumes:
-  ssh:
   claude:
     # Fixed name (not <project>_claude) so all projects share one login.
     # Declared external because compose warns when reusing a same-named volume

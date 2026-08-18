@@ -1,4 +1,5 @@
 {
+  "//": "DO NOT CHANGE THIS FILE. Template-owned, overwritten on update. It pins the devcontainer features by digest and must sit beside devcontainer.json.",
   "features": {
     "ghcr.io/aivar-codeborne/devcontainer-features/claude:1.0.7": {
       "version": "1.0.7",
