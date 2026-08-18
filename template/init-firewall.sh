@@ -140,12 +140,13 @@ done
 # the host is unreachable — as it was until this rule existed. Nothing is assumed
 # about the address: whatever the names resolve to is what gets allowed, and a name
 # that does not resolve is skipped.
-for host_alias in host.docker.internal gateway.docker.internal host.internal; do
-    for ip in $(dig +short "$host_alias" 2>/dev/null | grep -E '^[0-9]+\.' || true); do
-        echo "Allowing host address $ip ($host_alias)"
-        iptables -A OUTPUT -d "$ip" -j ACCEPT
-        iptables -A INPUT -s "$ip" -j ACCEPT
-    done
+HOST_IPS=$(for host_alias in host.docker.internal gateway.docker.internal host.internal; do
+    dig +short "$host_alias" 2>/dev/null | grep -E '^[0-9]+\.' || true
+done | sort -u)
+for ip in $HOST_IPS; do
+    echo "Allowing host address: $ip"
+    iptables -A OUTPUT -d "$ip" -j ACCEPT
+    iptables -A INPUT -s "$ip" -j ACCEPT
 done
 
 # Set default policies to DROP first

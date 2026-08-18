@@ -20,6 +20,9 @@
 # The empty `devcontainer: {}` below is a valid no-op — compose needs at least one
 # mapping, and the service's real definition is merged in from the template's file.
 #
+# Publishing a port: prefer the "127.0.0.1:5173:5173" form. The short "5173:5173"
+# binds every interface on your machine, so it exposes the container to your LAN.
+#
 # The application under development is meant to run on the host, not in here, so
 # most projects need nothing beyond the no-op below. When a service does belong in
 # the container's world, add it and reach it by name — compose puts both on the same

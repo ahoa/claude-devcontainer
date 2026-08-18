@@ -145,13 +145,14 @@ files survive template updates:
   whereas `domains.conf` is frozen the moment a project is installed.
 - **Ports** — nothing to configure. The app runs on the host and the container
   reaches it at `host.docker.internal:PORT`. If you do want to expose something
-  *from* the container, publish it in the override:
+  *from* the container, publish it in the override — bound to localhost, since the
+  short `"5173:5173"` form binds every interface on your machine, LAN included:
 
   ```yaml
   services:
     devcontainer:
       ports:
-        - "5173:5173"
+        - "127.0.0.1:5173:5173"
   ```
 - **Extra services** — add them to `.devcontainer/docker-compose.override.yml`,
   which is merged on top of the template's compose file. Mind that relative paths
@@ -302,10 +303,16 @@ docker run --rm -v <project>_claude:/from -v claude-shared:/to alpine cp -a /fro
 ## Notes
 
 - **The sandbox is not a security boundary against a hostile toolchain.** The
-  container runs with `NET_ADMIN`/`NET_RAW` (needed to program iptables) and
-  mounts the host Docker socket. The firewall limits accidental/agent egress; it
-  does not contain a determined attacker. The `docker.sock` mount is in
-  `.template/docker-compose.yml`; drop it there if the container has no need to
-  drive Docker, keeping in mind an update restores it.
+  container runs with `NET_ADMIN`/`NET_RAW` (needed to program iptables) and mounts
+  the host Docker socket — which is kept deliberately, since integration tests
+  start containers of their own, and which by itself amounts to control of the
+  host. The firewall limits accidental and agent egress; it does not contain a
+  determined attacker.
+- **The host is reachable, on every port.** The firewall allows whatever
+  `host.docker.internal` resolves to, because the application under development
+  runs there. That also puts anything else listening on your machine — other
+  projects' databases, your IDE's built-in server, SSH — within reach of code
+  running in the container. Bind local dev services to `127.0.0.1` if you would
+  rather they were not visible.
 - Claude is launched with `--dangerously-skip-permissions`; the firewall is the
   compensating control. Review `domains.conf` before trusting it.
