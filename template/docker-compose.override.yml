@@ -1,0 +1,27 @@
+# docker-compose.override.yml — your compose customizations.
+#
+# devcontainer.json lists this file after docker-compose.yml, so compose merges it
+# on top: services, ports, environment and extra volumes belong here rather than in
+# docker-compose.yml, which the template owns and overwrites on update.
+#
+# THIS FILE IS YOURS: the installer creates it once and never overwrites it.
+# Changing it is a build input, so start.sh forces a rebuild on the next run.
+#
+# The empty `devcontainer: {}` below is a valid no-op override — compose needs at
+# least one mapping, and the service's real definition is merged in from
+# docker-compose.yml.
+#
+# Example — a Postgres the devcontainer can reach. Add "5432 db 5432" to
+# PORT_FORWARDS in firewall-ports.conf to also reach it as localhost:5432:
+#
+#   services:
+#     db:
+#       image: postgres:17
+#       environment:
+#         POSTGRES_PASSWORD: dev
+#     devcontainer:
+#       environment:
+#         DATABASE_URL: postgres://postgres:dev@db:5432/postgres
+
+services:
+  devcontainer: {}

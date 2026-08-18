@@ -1,6 +1,9 @@
 {
   "name": "__PROJECT_NAME__",
-  "dockerComposeFile": "docker-compose.yml",
+  "dockerComposeFile": [
+    "docker-compose.yml",
+    "docker-compose.override.yml"
+  ],
   "service": "devcontainer",
   "workspaceFolder": "/workspace",
   "shutdownAction": "stopCompose",

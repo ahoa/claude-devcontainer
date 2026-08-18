@@ -2,13 +2,16 @@ FROM debian:13.4-slim
 
 # Core tools + the firewall toolchain (iptables/ipset/aggregate/dig/jq are all
 # used by init-firewall.sh). jq is required by the GitHub-IP-range parsing.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# tzdata carries the zoneinfo database the TZ setting below resolves against;
+# DEBIAN_FRONTEND keeps its postinst from prompting for a geographic area.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     git \
     zsh \
     tmux \
     sudo \
+    tzdata \
     iptables \
     ipset \
     aggregate \
@@ -44,6 +47,13 @@ ENV COLORTERM=truecolor
 # — no locale-gen needed — and applies to every process, not just interactive
 # shells.
 ENV LANG=C.UTF-8
+# Container clock, chosen at install time (the installer prompts; default
+# Europe/Tallinn). Without this the container runs UTC, so log lines, git commit
+# timestamps and Claude's own sense of "now" disagree with the host's wall clock.
+# TZ is what glibc reads; /etc/localtime and /etc/timezone cover the programs
+# that ignore it.
+ENV TZ=__TIMEZONE__
+RUN ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" > /etc/timezone
 
 # Workaround for OrbStack/Docker Desktop "fakeowner" bind-mount filesystems:
 # git's stat cache misinterprets inode/ctime changes and falsely reports
@@ -53,20 +63,22 @@ ENV LANG=C.UTF-8
 RUN git config --global core.checkStat minimal && \
     git config --global core.trustctime false
 
-# Firewall script + allow-list. Build-time has full network; the firewall only
-# applies at container runtime via postStartCommand.
+# Firewall script + its two config files (outbound hosts, inbound/forwarded
+# ports). Build-time has full network; the firewall only applies at container
+# runtime via postStartCommand.
 COPY init-firewall.sh /usr/local/bin/
 COPY allowed-domains.conf /usr/local/bin/
+COPY firewall-ports.conf /usr/local/bin/
 RUN chmod +x /usr/local/bin/init-firewall.sh && \
     echo "dev ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh" > /etc/sudoers.d/init-firewall && \
     chmod 0440 /etc/sudoers.d/init-firewall
 
-# ── Add your project's toolchain below (Node, JDK, Python, …) ──────────────
-# The base image is deliberately minimal. Build-time has full network, so a
-# plain apt/curl install works here. Example:
-#   RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-#       && apt-get install -y --no-install-recommends nodejs \
-#       && apt-get clean && rm -rf /var/lib/apt/lists/*
-# ───────────────────────────────────────────────────────────────────────────
+# Project toolchain (Node, JDK, Python, …). It lives in install-tools.sh rather
+# than in RUN lines here, because this Dockerfile belongs to the template and is
+# overwritten on update, while install-tools.sh is yours and is not. Kept last so
+# editing it invalidates no earlier layer, and dropped afterwards so the image
+# does not ship the script itself.
+COPY install-tools.sh /tmp/install-tools.sh
+RUN chmod +x /tmp/install-tools.sh && /tmp/install-tools.sh && rm -f /tmp/install-tools.sh
 
 WORKDIR /workspace

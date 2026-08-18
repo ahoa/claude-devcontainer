@@ -6,7 +6,8 @@
 # Prompts for a project name (used for the Docker image / compose project /
 # named volumes) and verifies it does not collide with anything Docker already
 # knows about, then asks how many tmux windows (each running its own Claude) the
-# session should open. Copies the template files, substituting those choices.
+# session should open and which timezone the container's clock should use.
+# Copies the template files, substituting those choices.
 #
 # Works both from a checkout and standalone (curl … | bash): when there is no
 # template/ next to the script, the template is downloaded from GitHub into a
@@ -22,21 +23,38 @@ TEMPLATE_DIR="$SCRIPT_DIR/template"
 # Where to fetch the template from when it is not available locally.
 REPO_URL="${CLAUDE_DEVCONTAINER_REPO:-https://github.com/ahoa/claude-devcontainer}"
 REPO_REF="${CLAUDE_DEVCONTAINER_REF:-main}"
+# The ref recorded in .devcontainer/.template-version for update.sh to keep
+# tracking. Defaults to the ref installed from; update.sh sets it explicitly
+# because it pins REPO_REF to an exact SHA (so the update installs precisely what
+# it compared against) while the project should go on tracking the branch.
+TRACK_REF="${CLAUDE_DEVCONTAINER_TRACK_REF:-$REPO_REF}"
 
-# Files copied verbatim into <target>/.devcontainer/.
-TEMPLATE_FILES=(
+# Template-owned files: always (re)written, so a re-run picks up template changes.
+MACHINERY_FILES=(
     Dockerfile
     devcontainer.json
     devcontainer-lock.json
     docker-compose.yml
     init-firewall.sh
-    allowed-domains.conf
     tmux.conf
     start.sh
     attach.sh
+    update.sh
 )
+# User-owned files: seeded once and never overwritten, so a re-run cannot clobber
+# a project's toolchain, ports, outbound hosts or compose additions. Everything a
+# project needs to customise must live in one of these — that is what makes
+# re-running the installer a safe update.
+USER_FILES=(
+    install-tools.sh
+    allowed-domains.conf
+    firewall-ports.conf
+    docker-compose.override.yml
+)
+# All files the template must provide (used to detect a complete template dir).
+TEMPLATE_FILES=("${MACHINERY_FILES[@]}" "${USER_FILES[@]}")
 # Files that get the executable bit.
-EXECUTABLE_FILES=(start.sh attach.sh init-firewall.sh)
+EXECUTABLE_FILES=(start.sh attach.sh update.sh init-firewall.sh install-tools.sh)
 
 usage() {
     cat <<'EOF'
@@ -48,6 +66,7 @@ target-dir defaults to the current directory.
 Options:
   --name NAME       Project name (lowercase [a-z0-9][a-z0-9_-]*). Prompted if omitted.
   --windows N       Number of tmux windows to open (each runs a Claude). Default 1.
+  --timezone ZONE   IANA timezone for the container clock. Default Europe/Tallinn.
   --force           Overwrite an existing .devcontainer/ and ignore name conflicts.
   -h, --help        Show this help.
 
@@ -66,14 +85,21 @@ EOF
 PROJECT_NAME=""
 NAME_FROM_ARG=0
 TMUX_WINDOWS=""
+TIMEZONE=""
+TZ_FROM_ARG=0
 TARGET_DIR=""
 FORCE=0
+# Timezone offered when the prompt is accepted with Enter, and used verbatim in a
+# non-interactive install that passes no --timezone.
+DEFAULT_TIMEZONE="Europe/Tallinn"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --name)      PROJECT_NAME="${2:-}"; NAME_FROM_ARG=1; shift 2 ;;
         --name=*)    PROJECT_NAME="${1#*=}"; NAME_FROM_ARG=1; shift ;;
         --windows)   TMUX_WINDOWS="${2:-}"; shift 2 ;;
         --windows=*) TMUX_WINDOWS="${1#*=}"; shift ;;
+        --timezone)  TIMEZONE="${2:-}"; TZ_FROM_ARG=1; shift 2 ;;
+        --timezone=*) TIMEZONE="${1#*=}"; TZ_FROM_ARG=1; shift ;;
         --force)     FORCE=1; shift ;;
         -h|--help)   usage; exit 0 ;;
         --)          shift; break ;;
@@ -154,8 +180,59 @@ validate_name() {
     [[ "$1" =~ ^[a-z0-9][a-z0-9_-]*$ ]]
 }
 
+# An IANA zone name: "UTC", "Europe/Tallinn", "America/Argentina/Salta". Checked
+# against the host's zoneinfo database when there is one, which catches typos
+# early; the container's tzdata is the real authority, so a host without
+# zoneinfo (or a zone only the container knows) falls back to a format check.
+validate_timezone() {
+    [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*(/[A-Za-z0-9._+-]+)*$ ]] || return 1
+    if [[ -d /usr/share/zoneinfo ]]; then
+        [[ -f "/usr/share/zoneinfo/$1" ]] || return 1
+    fi
+}
+
 docker_available() {
     command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1
+}
+
+is_user_file() {
+    local f
+    for f in "${USER_FILES[@]}"; do
+        [[ "$f" == "$1" ]] && return 0
+    done
+    return 1
+}
+
+# Which template commit this install came from — recorded in .devcontainer/ so
+# update.sh knows what to compare against. Prints a short SHA, or nothing when it
+# cannot be established.
+resolve_template_sha() {
+    local sha=""
+
+    # Running from a checkout: that checkout's HEAD is the answer. A dirty tree is
+    # marked, since the installed files then match no published commit.
+    if [[ -z "$FETCHED_DIR" ]] && sha="$(git -C "$SCRIPT_DIR" rev-parse --short=7 HEAD 2>/dev/null)"; then
+        if [[ -n "$(git -C "$SCRIPT_DIR" status --porcelain 2>/dev/null)" ]]; then
+            sha="$sha-dirty"
+        fi
+        echo "$sha"
+        return 0
+    fi
+
+    # Downloaded: a full SHA as the ref is already the answer; otherwise resolve
+    # the ref through the API. The `sha` media type returns the bare SHA as plain
+    # text, so this needs neither gh nor jq.
+    if [[ "$REPO_REF" =~ ^[0-9a-f]{7,40}$ ]]; then
+        echo "${REPO_REF:0:7}"
+        return 0
+    fi
+    case "$REPO_URL" in
+        https://github.com/*)
+            curl -fsSL -m 5 -H 'Accept: application/vnd.github.sha' \
+                "https://api.github.com/repos/${REPO_URL#https://github.com/}/commits/$REPO_REF" \
+                2>/dev/null | cut -c1-7
+            ;;
+    esac
 }
 
 # Prints each existing Docker object that would collide with the given name.
@@ -188,6 +265,38 @@ list_conflicts() {
     done < <(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E "^${n}[-_]devcontainer" || true)
 
     [[ $found -eq 1 ]]
+}
+
+# Lift a pre-split install's customizations into the user-owned files, before the
+# template files that used to hold them are overwritten. Older templates kept the
+# project's ports inside init-firewall.sh and its toolchain inside the Dockerfile;
+# both are template-owned now, so this is the last moment either can be recovered
+# automatically. Recognised by the absence of .template-version, which every
+# post-split install writes.
+migrate_pre_split_config() {
+    [[ -d "$DEST" && ! -f "$DEST/.template-version" ]] || return 0
+
+    # Ports are shell arrays either way, so they can be moved verbatim.
+    if [[ ! -f "$DEST/firewall-ports.conf" && -f "$DEST/init-firewall.sh" ]] \
+       && grep -q '^OPEN_PORTS=(' "$DEST/init-firewall.sh"; then
+        {
+            echo "# Lifted out of init-firewall.sh by install.sh — ports live here now."
+            awk '/^OPEN_PORTS=\(/,/\)/'    "$DEST/init-firewall.sh"
+            awk '/^PORT_FORWARDS=\(/,/\)/' "$DEST/init-firewall.sh"
+        } > "$DEST/firewall-ports.conf"
+        echo "→ Lifted OPEN_PORTS / PORT_FORWARDS out of init-firewall.sh into firewall-ports.conf"
+    fi
+
+    # The toolchain is Dockerfile syntax, not shell, so it cannot be converted
+    # mechanically — keep it verbatim beside the new script for the user to move.
+    local toolchain
+    toolchain="$(awk '/Add your project.s toolchain below/{f=1; next} f' "$DEST/Dockerfile" 2>/dev/null \
+                 | grep -vE '^[[:space:]]*#|^[[:space:]]*$|^WORKDIR ' || true)"
+    if [[ -n "$toolchain" ]]; then
+        printf '%s\n' "$toolchain" > "$DEST/install-tools.from-dockerfile"
+        MIGRATED_TOOLCHAIN=1
+        echo "→ Saved your Dockerfile toolchain lines to install-tools.from-dockerfile"
+    fi
 }
 
 # Migrate a pre-shared-login install: older versions of this template gave
@@ -265,12 +374,29 @@ if [[ ! "$TMUX_WINDOWS" =~ ^[1-9][0-9]*$ ]]; then
     exit 1
 fi
 
+# ── Container timezone ────────────────────────────────────────────────────────
+# Without this the container runs UTC. Re-prompts on a bad zone when there is a
+# terminal; a bad --timezone is fatal.
+while :; do
+    if [[ -z "$TIMEZONE" ]]; then
+        prompt_user TIMEZONE "Container timezone (IANA name) [$DEFAULT_TIMEZONE]: " || true
+        TIMEZONE="${TIMEZONE:-$DEFAULT_TIMEZONE}"
+    fi
+
+    if validate_timezone "$TIMEZONE"; then break; fi
+
+    echo "Unknown or malformed timezone '$TIMEZONE'. Use an IANA name, e.g. Europe/Tallinn or UTC." >&2
+    if [[ $TZ_FROM_ARG -eq 1 ]] || ! have_tty; then exit 1; fi
+    TIMEZONE=""
+done
+
 # ── Install ──────────────────────────────────────────────────────────────────
 DEST="$TARGET_DIR/.devcontainer"
 if [[ -e "$DEST" && $FORCE -ne 1 ]]; then
     echo "'$DEST' already exists."
+    echo "Template files will be replaced; your ${#USER_FILES[@]} config files (${USER_FILES[*]}) are kept as they are."
     ans=""
-    if prompt_user ans "Overwrite the template files in it? [y/N] "; then
+    if prompt_user ans "Continue? [y/N] "; then
         [[ "$ans" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 1; }
     else
         echo "ERROR: refusing to overwrite without a terminal. Pass --force." >&2
@@ -278,13 +404,26 @@ if [[ -e "$DEST" && $FORCE -ne 1 ]]; then
     fi
 fi
 
+# Recover a pre-split install's toolchain/ports before overwriting the files that
+# held them. No-op on fresh installs and on anything already carrying a stamp.
+MIGRATED_TOOLCHAIN=0
+migrate_pre_split_config
+
 mkdir -p "$DEST"
+KEPT_FILES=()
 for f in "${TEMPLATE_FILES[@]}"; do
+    # A user-owned file that already exists is left untouched — this is what makes
+    # a re-run an update rather than a clobber.
+    if is_user_file "$f" && [[ -e "$DEST/$f" ]]; then
+        KEPT_FILES+=("$f")
+        continue
+    fi
     cp "$TEMPLATE_DIR/$f" "$DEST/$f"
     # Substitute install-time placeholders. -i.bak works on both GNU and BSD sed.
     sed -i.bak \
         -e "s|__PROJECT_NAME__|$PROJECT_NAME|g" \
         -e "s|__TMUX_WINDOWS__|$TMUX_WINDOWS|g" \
+        -e "s|__TIMEZONE__|$TIMEZONE|g" \
         "$DEST/$f"
     rm -f "$DEST/$f.bak"
 done
@@ -293,10 +432,25 @@ for f in "${EXECUTABLE_FILES[@]}"; do
     chmod +x "$DEST/$f"
 done
 
-# Keep the runtime build-hash marker out of git.
+# Keep runtime markers out of git: the build-input hash and the update-check cache.
 if [[ ! -f "$DEST/.gitignore" ]]; then
-    printf '.build-hash\n' > "$DEST/.gitignore"
+    printf '.build-hash\n.update-check\n' > "$DEST/.gitignore"
 fi
+
+# Record which template version this install came from, plus the answers needed to
+# re-render it. update.sh reads this to know what to compare against and how to
+# re-run the installer without asking again. Meant to be committed — it travels
+# with the project, unlike the two runtime markers above.
+TEMPLATE_SHA="$(resolve_template_sha || true)"
+cat > "$DEST/.template-version" <<EOF
+# Written by install.sh — do not edit by hand. Commit this file.
+TEMPLATE_SHA=${TEMPLATE_SHA:-unknown}
+TEMPLATE_REPO=$REPO_URL
+TEMPLATE_REF=$TRACK_REF
+PROJECT_NAME=$PROJECT_NAME
+TMUX_WINDOWS=$TMUX_WINDOWS
+TIMEZONE=$TIMEZONE
+EOF
 
 # Carry an old per-project Claude login over to the shared volume (no-op on
 # fresh installs and when the shared volume is already logged in).
@@ -307,11 +461,31 @@ cat <<EOF
 ✓ Installed Claude devcontainer into $DEST
     project name : $PROJECT_NAME
     tmux windows : $TMUX_WINDOWS
+    timezone     : $TIMEZONE
+EOF
+
+if [[ ${#KEPT_FILES[@]} -gt 0 ]]; then
+    printf '    kept as-is   : %s\n' "${KEPT_FILES[*]}"
+fi
+
+if [[ $MIGRATED_TOOLCHAIN -eq 1 ]]; then
+    cat <<EOF
+
+⚠  Your toolchain used to live in the Dockerfile, which this install replaced.
+   The old lines are in $DEST/install-tools.from-dockerfile.
+   Move them into $DEST/install-tools.sh as plain shell
+   (drop the leading 'RUN '), then delete the .from-dockerfile file.
+   Until you do, the image builds without your toolchain.
+EOF
+fi
+
+cat <<EOF
 
 Next:
-  1. Add your project's toolchain to $DEST/Dockerfile (Node/JDK/Python/…).
-  2. Add any extra outbound hosts to $DEST/allowed-domains.conf,
-     and open dev-server ports in $DEST/init-firewall.sh (OPEN_PORTS).
-  3. Start it:   (cd "$TARGET_DIR" && ./.devcontainer/start.sh)
+  1. Add your project's toolchain to $DEST/install-tools.sh (Node/JDK/Python/…).
+  2. Add any extra outbound hosts to $DEST/allowed-domains.conf, and
+     dev-server / forwarded ports to $DEST/firewall-ports.conf.
+  3. Extra compose services go in $DEST/docker-compose.override.yml.
+  4. Start it:   (cd "$TARGET_DIR" && ./.devcontainer/start.sh)
      Re-attach:  (cd "$TARGET_DIR" && ./.devcontainer/attach.sh)
 EOF

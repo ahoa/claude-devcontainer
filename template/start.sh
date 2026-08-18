@@ -53,10 +53,13 @@ fi
 BUILD_INPUTS=(
     "$SCRIPT_DIR/Dockerfile"
     "$SCRIPT_DIR/docker-compose.yml"
+    "$SCRIPT_DIR/docker-compose.override.yml"
     "$SCRIPT_DIR/devcontainer.json"
     "$SCRIPT_DIR/tmux.conf"
     "$SCRIPT_DIR/init-firewall.sh"
     "$SCRIPT_DIR/allowed-domains.conf"
+    "$SCRIPT_DIR/firewall-ports.conf"
+    "$SCRIPT_DIR/install-tools.sh"
 )
 BUILD_HASH="$(cat "${BUILD_INPUTS[@]}" 2>/dev/null | sha256sum | cut -d' ' -f1)"
 HASH_FILE="$SCRIPT_DIR/.build-hash"
@@ -67,6 +70,13 @@ if [[ ! -f "$HASH_FILE" || "$(cat "$HASH_FILE" 2>/dev/null)" != "$BUILD_HASH" ]]
     UP_ARGS+=(--remove-existing-container)
 else
     echo "==> devcontainer up (build inputs unchanged — reusing existing container)"
+fi
+
+# Tell us about a newer template, but never get in the way: update.sh caches the
+# remote SHA for a day, times out fast, and stays silent when offline or when
+# already current. Exit 1 just means "update available", so swallow it.
+if [[ -x "$SCRIPT_DIR/update.sh" ]]; then
+    "$SCRIPT_DIR/update.sh" --check || true
 fi
 
 # The Claude config/login volume is shared by every project installed from this

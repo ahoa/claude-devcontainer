@@ -4,6 +4,20 @@ IFS=$'\n\t'       # Stricter word splitting
 
 echo "=== Initializing container firewall ==="
 
+# --- Project-specific ports (user-owned config) ---
+# OPEN_PORTS and PORT_FORWARDS live in firewall-ports.conf, which the template
+# never overwrites. Defaults are set first, so a missing config file — or one that
+# defines only one of the two arrays — still leaves this script working.
+PORTS_CONF="/usr/local/bin/firewall-ports.conf"
+OPEN_PORTS=()
+PORT_FORWARDS=()
+if [[ -f "$PORTS_CONF" ]]; then
+    # shellcheck source=/dev/null
+    source "$PORTS_CONF"
+else
+    echo "No $PORTS_CONF — no extra inbound ports or port forwards"
+fi
+
 # --- Helper functions ---
 
 add_cidrs() {
@@ -68,11 +82,7 @@ iptables -A INPUT -p tcp --sport 22 -m state --state ESTABLISHED -j ACCEPT
 iptables -A INPUT -i lo -j ACCEPT
 iptables -A OUTPUT -o lo -j ACCEPT
 
-# --- Project-specific inbound ports ---
-# Add dev-server / API ports your app listens on so a browser on the host can
-# reach them (e.g. a Vite dev server on 5173). Empty by default.
-#   OPEN_PORTS=(3000 5173)
-OPEN_PORTS=()
+# --- Project-specific inbound ports (from firewall-ports.conf) ---
 for port in "${OPEN_PORTS[@]}"; do
     echo "Allowing inbound TCP port $port"
     iptables -A INPUT -p tcp --dport "$port" -j ACCEPT
@@ -133,11 +143,8 @@ done
 # devcontainer.
 echo "Configuring localhost port forwarding to service containers..."
 
-# Format: "<local_port> <service_name> <service_port>". Empty by default.
-PORT_FORWARDS=(
-
-)
-
+# PORT_FORWARDS comes from firewall-ports.conf; entries are
+# "<local_port> <service_name> <service_port>".
 for entry in "${PORT_FORWARDS[@]}"; do
     IFS=' ' read -r local_port service_host service_port <<<"$entry"
     service_ip=$(getent hosts "$service_host" | awk '{print $1}' | head -1)

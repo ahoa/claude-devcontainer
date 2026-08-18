@@ -1,0 +1,189 @@
+#!/bin/bash
+#
+# update.sh — pull a newer version of the devcontainer template into this project.
+#
+# Updating is just a re-run of the installer at a newer commit: it rewrites the
+# template-owned files and leaves the user-owned ones (install-tools.sh,
+# allowed-domains.conf, firewall-ports.conf, docker-compose.override.yml) exactly
+# as they are. That split is what makes an update safe, so there is no merging to
+# do here.
+#
+#   ./update.sh            update to the latest commit on the recorded ref
+#   ./update.sh --check    report whether an update exists (used by start.sh)
+#   ./update.sh --ref REF  update to a specific branch, tag or commit
+#   ./update.sh --force    update even on a dirty tree / when already current
+#
+# Requires a clean git tree under .devcontainer/, so `git diff` shows exactly what
+# the update changed and `git checkout` undoes it.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+STAMP="$SCRIPT_DIR/.template-version"
+# Remote SHA cache, refreshed at most once a day — a --check on every start.sh
+# must not cost a network round-trip.
+CACHE="$SCRIPT_DIR/.update-check"
+CACHE_MAX_AGE_MIN=1440
+
+CHECK_ONLY=0
+FORCE=0
+REF_OVERRIDE=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --check)   CHECK_ONLY=1; shift ;;
+        --force)   FORCE=1; shift ;;
+        --ref)     REF_OVERRIDE="${2:-}"; shift 2 ;;
+        --ref=*)   REF_OVERRIDE="${1#*=}"; shift ;;
+        -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *)         echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+done
+
+# ── Recorded install ─────────────────────────────────────────────────────────
+# Defaults cover a .devcontainer/ installed before stamping existed; the values
+# are re-derived from the installed files below.
+TEMPLATE_SHA=""
+TEMPLATE_REPO="https://github.com/ahoa/claude-devcontainer"
+TEMPLATE_REF="main"
+PROJECT_NAME=""
+TMUX_WINDOWS=""
+TIMEZONE=""
+if [[ -f "$STAMP" ]]; then
+    # shellcheck source=/dev/null
+    source "$STAMP"
+fi
+[[ -n "$REF_OVERRIDE" ]] && TEMPLATE_REF="$REF_OVERRIDE"
+
+# A pre-stamp install still knows its answers — they are substituted into the
+# installed files, so read them back rather than asking again.
+if [[ -z "$PROJECT_NAME" ]]; then
+    PROJECT_NAME="$(awk -F': *' '/^name:/{print $2; exit}' "$SCRIPT_DIR/docker-compose.yml" 2>/dev/null || true)"
+fi
+if [[ -z "$TMUX_WINDOWS" ]]; then
+    TMUX_WINDOWS="$(sed -n 's/^WINDOWS="\${TMUX_WINDOWS:-\([0-9]*\)}".*/\1/p' "$SCRIPT_DIR/start.sh" 2>/dev/null | head -1)"
+fi
+if [[ -z "$TIMEZONE" ]]; then
+    TIMEZONE="$(sed -n 's/^ENV TZ=\(.*\)/\1/p' "$SCRIPT_DIR/Dockerfile" 2>/dev/null | head -1)"
+fi
+[[ -z "$PROJECT_NAME" ]] && { echo "ERROR: cannot determine the project name — is $SCRIPT_DIR a devcontainer install?" >&2; exit 1; }
+TMUX_WINDOWS="${TMUX_WINDOWS:-1}"
+TIMEZONE="${TIMEZONE:-Europe/Tallinn}"
+
+# ── Latest remote SHA ────────────────────────────────────────────────────────
+# The `sha` media type returns the bare commit SHA as plain text, so resolving a
+# ref needs neither `gh` nor `jq` — just curl. Public repo, so no auth either.
+api_url() {
+    case "$TEMPLATE_REPO" in
+        https://github.com/*) echo "https://api.github.com/repos/${TEMPLATE_REPO#https://github.com/}" ;;
+        *)                    return 1 ;;
+    esac
+}
+
+fetch_remote_sha() {
+    local api
+    api="$(api_url)" || return 1
+    curl -fsSL -m 5 -H 'Accept: application/vnd.github.sha' \
+        "$api/commits/$TEMPLATE_REF" 2>/dev/null | cut -c1-7
+}
+
+# Reuse the cached SHA while it is fresh; a failed refresh falls back to whatever
+# is cached, so being offline degrades to "no news" rather than an error.
+REMOTE_SHA=""
+if [[ -n "$REF_OVERRIDE" ]]; then
+    REMOTE_SHA="$(fetch_remote_sha || true)"          # explicit ref: never cached
+elif [[ -n "$(find "$CACHE" -mmin "-$CACHE_MAX_AGE_MIN" 2>/dev/null)" ]]; then
+    REMOTE_SHA="$(cat "$CACHE" 2>/dev/null || true)"
+else
+    REMOTE_SHA="$(fetch_remote_sha || true)"
+    [[ -n "$REMOTE_SHA" ]] && echo "$REMOTE_SHA" > "$CACHE"
+    [[ -z "$REMOTE_SHA" ]] && REMOTE_SHA="$(cat "$CACHE" 2>/dev/null || true)"
+fi
+
+if [[ -z "$REMOTE_SHA" ]]; then
+    [[ $CHECK_ONLY -eq 1 ]] && exit 0   # stay silent inside start.sh
+    echo "ERROR: could not resolve $TEMPLATE_REPO ref '$TEMPLATE_REF'. Check your network." >&2
+    exit 1
+fi
+
+CURRENT="${TEMPLATE_SHA:-unknown}"
+
+# ── --check: report and exit ─────────────────────────────────────────────────
+if [[ $CHECK_ONLY -eq 1 ]]; then
+    if [[ "$CURRENT" == "$REMOTE_SHA" ]]; then
+        exit 0
+    fi
+    # 33 = yellow. Exit 1 marks "update available" for scripted callers.
+    printf '\033[33m⚡ devcontainer template update: %s → %s — run ./.devcontainer/update.sh\033[0m\n' \
+        "$CURRENT" "$REMOTE_SHA"
+    exit 1
+fi
+
+if [[ "$CURRENT" == "$REMOTE_SHA" && $FORCE -ne 1 ]]; then
+    echo "✓ devcontainer template already up to date ($CURRENT)"
+    exit 0
+fi
+
+echo "Updating devcontainer template: $CURRENT → $REMOTE_SHA"
+
+# ── Refuse to work on a dirty tree ───────────────────────────────────────────
+# git is the only undo for this operation, so it has to be usable.
+if [[ $FORCE -ne 1 ]]; then
+    if ! git -C "$PROJECT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+        echo "ERROR: $PROJECT_DIR is not a git repository — nothing to undo an update with." >&2
+        echo "       Commit the project to git first, or re-run with --force." >&2
+        exit 1
+    fi
+    if [[ -n "$(git -C "$PROJECT_DIR" status --porcelain -- "$SCRIPT_DIR" 2>/dev/null)" ]]; then
+        echo "ERROR: .devcontainer/ has uncommitted changes." >&2
+        echo "       Commit or stash them first, so 'git diff' after the update shows only the update." >&2
+        echo "       Or re-run with --force to update anyway." >&2
+        exit 1
+    fi
+fi
+
+# ── Re-run the installer at the target commit ───────────────────────────────
+# A pre-split install's toolchain and ports are lifted into the user-owned files
+# by the installer itself (it recognises the old layout by the missing stamp), so
+# there is nothing to do for that here.
+# Pinned to the resolved SHA rather than the ref, so what gets installed is
+# exactly what was compared against — and is what the new stamp will record.
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+if ! curl -fsSL "$TEMPLATE_REPO/raw/$REMOTE_SHA/install.sh" -o "$TMP/install.sh"; then
+    echo "ERROR: could not download install.sh at $REMOTE_SHA" >&2
+    exit 1
+fi
+
+# Only pass flags the target installer actually knows: --ref can point at a commit
+# older than a flag, and an unknown option there is fatal. The installer's own
+# default then applies, which is the right fallback.
+INSTALL_ARGS=(--name "$PROJECT_NAME" --windows "$TMUX_WINDOWS" --force)
+grep -q -- '--timezone' "$TMP/install.sh" && INSTALL_ARGS+=(--timezone "$TIMEZONE")
+
+CLAUDE_DEVCONTAINER_REPO="$TEMPLATE_REPO" \
+CLAUDE_DEVCONTAINER_REF="$REMOTE_SHA" \
+CLAUDE_DEVCONTAINER_TRACK_REF="$TEMPLATE_REF" \
+    bash "$TMP/install.sh" "${INSTALL_ARGS[@]}" "$PROJECT_DIR"
+
+# Installers older than the stamp itself write no .template-version, which would
+# leave --check offering the same update forever. Record it here when the
+# installer did not — a no-op whenever it did.
+if ! grep -qx "TEMPLATE_SHA=$REMOTE_SHA" "$STAMP" 2>/dev/null; then
+    cat > "$STAMP" <<EOF
+# Written by update.sh — do not edit by hand. Commit this file.
+TEMPLATE_SHA=$REMOTE_SHA
+TEMPLATE_REPO=$TEMPLATE_REPO
+TEMPLATE_REF=$TEMPLATE_REF
+PROJECT_NAME=$PROJECT_NAME
+TMUX_WINDOWS=$TMUX_WINDOWS
+TIMEZONE=$TIMEZONE
+EOF
+fi
+
+cat <<EOF
+
+Next:
+  1. Review what changed:  git -C "$PROJECT_DIR" diff -- .devcontainer
+  2. Start it:             ./.devcontainer/start.sh
+     start.sh sees the changed build inputs and does a clean rebuild.
+EOF

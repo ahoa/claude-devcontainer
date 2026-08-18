@@ -1,4 +1,7 @@
 name: __PROJECT_NAME__
+# Template-owned: overwritten by a template update. Put project additions —
+# services, ports, environment, extra volumes — in docker-compose.override.yml,
+# which devcontainer.json merges on top of this file and updates never touch.
 services:
   devcontainer:
     build:

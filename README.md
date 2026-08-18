@@ -6,18 +6,33 @@ sandbox and a long-lived `tmux` session. Drop it into any repo with one command.
 
 ## What you get
 
-Running `install.sh` writes these into your project's `.devcontainer/`:
+Running `install.sh` writes these into your project's `.devcontainer/`. They split
+in two: the **template owns** most of them and overwrites them on update, while
+four are **yours** — created once, never touched again. Everything a project needs
+to customise lives in those four, which is what makes updating safe.
+
+Template-owned:
 
 | File | Purpose |
 |------|---------|
-| `Dockerfile` | Minimal Debian base: `git`, `zsh`, `tmux`, firewall tooling, a `dev` user, and Claude's config baked to a persisted path. **No language runtimes** — add your own. |
+| `Dockerfile` | Minimal Debian base: `git`, `zsh`, `tmux`, firewall tooling, a `dev` user, the timezone you picked, and Claude's config baked to a persisted path. **No language runtimes** — those go in `install-tools.sh`. |
 | `docker-compose.yml` | The devcontainer service + named volumes: `ssh` (per-project deploy key) and `claude-shared` (Claude login/config, one volume shared by **all** projects — log in once, every devcontainer is authenticated). |
-| `devcontainer.json` | Wires in the `common-utils`, Claude, and `docker-outside-of-docker` features; runs the firewall on start. |
+| `devcontainer.json` | Wires in the `common-utils`, Claude, and `docker-outside-of-docker` features; merges the compose override; runs the firewall on start. |
 | `devcontainer-lock.json` | Pins the three features by digest. |
-| `init-firewall.sh` + `allowed-domains.conf` | Runtime egress firewall — default-deny outbound, allowing only GitHub, Anthropic, npm, Docker Hub, and hosts you add. |
-| `tmux.conf` | `Ctrl-a` prefix, mouse, big scrollback, truecolor. |
+| `init-firewall.sh` | Runtime egress firewall — default-deny outbound, allowing only GitHub, Anthropic, npm, Docker Hub, and what you add. |
+| `tmux.conf` | `Ctrl-a` prefix, mouse, big scrollback, truecolor, OSC 52 clipboard, vi copy mode. |
 | `start.sh` | Builds/starts the container (rebuilding only when build inputs change) and attaches Claude in tmux. |
 | `attach.sh` | Fast re-attach to the running session (no rebuild). |
+| `update.sh` | Pulls a newer template into the project; `--check` reports whether one exists. |
+
+Yours — seeded once, never overwritten:
+
+| File | Purpose |
+|------|---------|
+| `install-tools.sh` | Your project's toolchain (Node, JDK, Python, …). Runs as root at image build time, with full network. |
+| `allowed-domains.conf` | Extra outbound hosts, one per line. |
+| `firewall-ports.conf` | `OPEN_PORTS` (inbound dev-server ports) and `PORT_FORWARDS` (localhost:PORT → compose service). |
+| `docker-compose.override.yml` | Extra services, ports, env and volumes, merged on top of `docker-compose.yml`. |
 
 ## Install
 
@@ -47,7 +62,7 @@ since the current one is the clone itself:
 ./install.sh /path/to/your/project
 ```
 
-It asks two things:
+It asks three things:
 
 1. **Project name** — used for the Docker image, the compose project name, and
    the named volumes. Must be lowercase (`[a-z0-9][a-z0-9_-]*`). The installer
@@ -55,6 +70,11 @@ It asks two things:
    with that name and makes you pick another if it collides (override with
    `--force`).
 2. **How many tmux windows** — each window runs its own Claude. Default `1`.
+3. **Timezone** — the container's clock, as an IANA zone name. Default
+   `Europe/Tallinn`; press Enter to accept it. Checked against the host's
+   zoneinfo database, so typos are caught before the build. Without this the
+   container would run UTC and its timestamps would disagree with your wall
+   clock.
 
 Non-interactive — pass the answers as flags, either form:
 
@@ -62,13 +82,14 @@ Non-interactive — pass the answers as flags, either form:
 curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh \
   | bash -s -- --name myapp --windows 2
 
-./install.sh --name myapp --windows 2 /path/to/your/project
+./install.sh --name myapp --windows 2 --timezone UTC /path/to/your/project
 ```
 
 | Flag | Meaning |
 |------|---------|
 | `--name NAME` | Project name (skips the prompt). |
 | `--windows N` | Number of tmux windows (default `1`). |
+| `--timezone ZONE` | IANA timezone for the container clock (default `Europe/Tallinn`). |
 | `--force` | Overwrite an existing `.devcontainer/` and reuse conflicting Docker objects. |
 
 | Env var | Meaning |
@@ -78,15 +99,22 @@ curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh \
 
 ## After installing
 
-The base image is intentionally empty of language runtimes. Customise:
+The base image is intentionally empty of language runtimes. Customise — all four
+files survive template updates:
 
-- **Toolchain** — add `RUN` lines to `.devcontainer/Dockerfile` (Node, JDK,
-  Python, …). Build time has full network access; the firewall only applies at
-  runtime.
+- **Toolchain** — write plain shell into `.devcontainer/install-tools.sh` (Node,
+  JDK, Python, …). It runs as root at build time, where the network is
+  unrestricted; the firewall only applies at runtime.
 - **Outbound hosts** — add domains to `.devcontainer/allowed-domains.conf`
   (one host per line). GitHub ranges are already fetched dynamically.
 - **Dev-server ports** — set `OPEN_PORTS=(3000 5173)` in
-  `.devcontainer/init-firewall.sh` to let a host browser reach your dev server.
+  `.devcontainer/firewall-ports.conf` to let a host browser reach your dev
+  server; `PORT_FORWARDS=("5432 db 5432")` maps `localhost:5432` inside the
+  container to a compose service.
+- **Extra services** — add them to `.devcontainer/docker-compose.override.yml`,
+  which is merged on top of `docker-compose.yml`.
+
+Each of these is a build input, so `start.sh` rebuilds when you change one.
 
 ## Run
 
@@ -99,7 +127,8 @@ cd /path/to/your/project
 ```
 
 `start.sh` hashes the build inputs and only forces a clean rebuild when they
-change; otherwise it reuses the existing container. The tmux session (and the
+change; otherwise it reuses the existing container. It also prints a one-line
+notice when a newer template exists (see [Updating](#updating)). The tmux session (and the
 Claude login, via the `claude-shared` volume) persists across disconnects and
 rebuilds, so you can detach, reconnect from another machine, and pick up exactly
 where you left off. Set `TMUX_WINDOWS=N` in the environment to override the
@@ -110,6 +139,62 @@ template mounts the same one, so a single `/login` in any devcontainer
 authenticates them all. `start.sh` creates the volume on first run; if you
 bypass `start.sh` (e.g. VS Code's "Reopen in Container"), create it once with
 `docker volume create claude-shared`.
+
+## Updating
+
+`install.sh` records the template commit it installed from in
+`.devcontainer/.template-version` (commit that file). `start.sh` compares it
+against the repo on every run — the remote SHA is cached for a day, times out
+after 5 s, and stays quiet when offline — and prints one line when a newer
+template exists:
+
+```
+⚡ devcontainer template update: fe7781b → a3c91f2 — run ./.devcontainer/update.sh
+```
+
+```sh
+./.devcontainer/update.sh            # update to the latest commit
+./.devcontainer/update.sh --check    # just report; exit 1 = update available
+./.devcontainer/update.sh --ref v2   # update to a specific branch, tag or commit
+```
+
+An update is simply the installer re-run at a newer commit: template-owned files
+are rewritten, your four config files are left alone, and the new build inputs
+make the next `start.sh` do a clean rebuild. There is nothing to merge.
+
+It refuses to run on a dirty `.devcontainer/`, so `git diff` afterwards shows
+exactly what the update changed and `git checkout` undoes it. Pass `--force` to
+override that.
+
+### Projects installed before any of this existed
+
+They have no `update.sh` and no `.template-version`, so bootstrap them by running
+the installer once — the same command as a fresh install, with the **same project
+name** and `--force`:
+
+```sh
+cd /path/to/your/project
+curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh \
+  | bash -s -- --name <project> --force
+```
+
+Seeing no stamp, the installer recognises the old layout and rescues what used to
+live in template-owned files before replacing them:
+
+- `OPEN_PORTS` and `PORT_FORWARDS` are lifted out of `init-firewall.sh` into a new
+  `firewall-ports.conf`, multi-line arrays included. Nothing to do.
+- Toolchain lines found in the `Dockerfile` are saved verbatim to
+  `install-tools.from-dockerfile` and the installer says so. **This part is
+  manual**: they are Dockerfile syntax, not shell, so move them into
+  `install-tools.sh` yourself (drop the leading `RUN `) and delete the
+  `.from-dockerfile` file. Until you do, the image builds without your toolchain.
+
+`allowed-domains.conf` is kept as it is. Afterwards the project has `update.sh`
+and a stamp, and every later update is a single `./.devcontainer/update.sh`.
+
+From that point on, `update.sh` also copes with a missing stamp on its own: it
+reads the project name, window count and timezone back out of the installed files
+rather than asking again.
 
 ## Migrating an older install
 
@@ -126,10 +211,11 @@ curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh \
 
 This does three things:
 
-1. **Overwrites all template files** — including any customizations you made to
-   `Dockerfile`, `allowed-domains.conf` and `init-firewall.sh` (`OPEN_PORTS`).
-   They are in your project's git, so restore your additions afterwards with
-   `git diff` / `git add -p`.
+1. **Overwrites the template-owned files**, keeping the four user-owned ones.
+   Customizations that predate the split are rescued rather than lost — see
+   [Projects installed before any of this existed](#projects-installed-before-any-of-this-existed)
+   for what lands where and which part you still have to move by hand. The project
+   is in git either way, so `git diff` shows exactly what changed.
 2. **Migrates the login**: if the old `<project>_claude` volume exists and
    `claude-shared` does not yet hold a login, its contents (credentials, config,
    session transcripts) are copied into `claude-shared`. If `claude-shared` is
@@ -154,7 +240,8 @@ docker run --rm -v <project>_claude:/from -v claude-shared:/to alpine cp -a /fro
 ## Requirements
 
 - Docker (with Compose v2)
-- `bash`, plus `curl` and `tar` when installing without a checkout
+- `bash` and `curl` — `curl` also does the update check and the update itself;
+  plus `tar` when installing without a checkout
 - Node.js / `npm` on the host — `start.sh` installs the `@devcontainers/cli`
   locally into the project on first run.
 
