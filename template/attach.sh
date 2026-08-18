@@ -43,7 +43,7 @@ if [[ ! -x "$DEVCONTAINER_BIN" ]]; then
     exit 1
 fi
 
-if ! "$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" true >/dev/null 2>&1; then
+if ! "$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" --config "$TEMPLATE_DIR/devcontainer.json" true >/dev/null 2>&1; then
     echo "ERROR: dev container is not running. Run ./start.sh to build and start it." >&2
     exit 1
 fi
@@ -63,5 +63,5 @@ fi
 CLAUDE_CMD="$CLAUDE_BASE_CMD$RESUME"
 
 echo "==> Attaching to tmux session '$SESSION' ($WINDOWS window(s))..."
-exec "$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" \
+exec "$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" --config "$TEMPLATE_DIR/devcontainer.json" \
     zsh -c "if ! tmux has-session -t '$SESSION' 2>/dev/null; then tmux new-session -d -s '$SESSION' -n claude1 '$CLAUDE_CMD'; for i in \$(seq 2 $WINDOWS); do tmux new-window -d -t '$SESSION:' -n claude\$i '$CLAUDE_BASE_CMD'; done; fi; exec tmux attach -t '$SESSION'"

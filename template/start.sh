@@ -62,7 +62,7 @@ BUILD_INPUTS=(
     "$TEMPLATE_DIR/docker-compose.yml"
     "$TEMPLATE_DIR/tmux.conf"
     "$TEMPLATE_DIR/init-firewall.sh"
-    "$SCRIPT_DIR/devcontainer.json"
+    "$TEMPLATE_DIR/devcontainer.json"
     "$SCRIPT_DIR/tools.sh"
     "$SCRIPT_DIR/domains.conf"
     "$SCRIPT_DIR/ports.conf"
@@ -71,7 +71,9 @@ BUILD_INPUTS=(
 BUILD_HASH="$(cat "${BUILD_INPUTS[@]}" 2>/dev/null | sha256sum | cut -d' ' -f1)"
 HASH_FILE="$SCRIPT_DIR/.build-hash"
 
-UP_ARGS=(up --workspace-folder "$PROJECT_DIR" --log-level debug)
+# --config points at the hidden devcontainer.json; without it the CLI would look
+# for one at .devcontainer/devcontainer.json, where this template no longer puts it.
+UP_ARGS=(up --workspace-folder "$PROJECT_DIR" --config "$TEMPLATE_DIR/devcontainer.json" --log-level debug)
 if [[ ! -f "$HASH_FILE" || "$(cat "$HASH_FILE" 2>/dev/null)" != "$BUILD_HASH" ]]; then
     echo "==> devcontainer build inputs changed (or first run) — forcing a clean rebuild"
     UP_ARGS+=(--remove-existing-container)
@@ -116,5 +118,5 @@ fi
 CLAUDE_CMD="$CLAUDE_BASE_CMD$RESUME"
 
 echo "==> Attaching Claude in tmux session '$SESSION' ($WINDOWS window(s))..."
-exec "$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" \
+exec "$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" --config "$TEMPLATE_DIR/devcontainer.json" \
     zsh -c "if ! tmux has-session -t '$SESSION' 2>/dev/null; then tmux new-session -d -s '$SESSION' -n claude1 '$CLAUDE_CMD'; for i in \$(seq 2 $WINDOWS); do tmux new-window -d -t '$SESSION:' -n claude\$i '$CLAUDE_BASE_CMD'; done; fi; exec tmux attach -t '$SESSION'"

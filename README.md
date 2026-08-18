@@ -18,10 +18,10 @@ Running `install.sh` writes this into your project:
 ├── start.sh                     the commands you run
 ├── attach.sh
 ├── update.sh
-├── devcontainer.json            must sit here for VS Code to find it
-├── devcontainer-lock.json
 │
 └── .template/                   machinery — hidden, never edit
+    ├── devcontainer.json
+    ├── devcontainer-lock.json
     ├── Dockerfile
     ├── docker-compose.yml
     ├── init-firewall.sh
@@ -29,9 +29,14 @@ Running `install.sh` writes this into your project:
 ```
 
 **The four files at the top are yours.** They are created once and never
-overwritten, so a template update cannot touch them. Everything else belongs to
-the template, says `DO NOT CHANGE THIS FILE` at the top, and is replaced on
-update — which is why the bulk of it is tucked out of sight in `.template/`.
+overwritten, so a template update cannot touch them. The three scripts are the
+commands you run. Everything else is machinery: it says `DO NOT CHANGE THIS FILE`
+at the top, is replaced on update, and lives out of sight in `.template/`.
+
+`start.sh` and `attach.sh` point the devcontainer CLI at the hidden config with
+`--config`, so `devcontainer.json` does not have to sit where the CLI would look
+for it on its own. Driving the container by hand needs that flag too:
+`devcontainer up --workspace-folder . --config .devcontainer/.template/devcontainer.json`.
 
 Yours:
 
@@ -50,8 +55,8 @@ The template's:
 | `.template/docker-compose.yml` | The devcontainer service, plus the `claude-shared` volume (Claude login/config, one volume shared by **all** projects — log in once, every devcontainer is authenticated). |
 | `.template/init-firewall.sh` | Runtime egress firewall — default-deny outbound, allowing only GitHub, Anthropic, npm, Docker Hub, and what you add. |
 | `.template/tmux.conf` | `Ctrl-a` prefix, mouse, big scrollback, truecolor, OSC 52 clipboard, vi copy mode. |
-| `devcontainer.json` | Wires in the `common-utils`, Claude, and `docker-outside-of-docker` features; merges `docker-compose.override.yml`; runs the firewall on start. |
-| `devcontainer-lock.json` | Pins the three features by digest. Has to sit beside `devcontainer.json`. |
+| `.template/devcontainer.json` | Wires in the `common-utils`, Claude, and `docker-outside-of-docker` features; merges `docker-compose.override.yml`; runs the firewall on start. |
+| `.template/devcontainer-lock.json` | Pins the three features by digest. Has to sit beside `devcontainer.json`. |
 | `start.sh` | Builds/starts the container (rebuilding only when build inputs change) and attaches Claude in tmux. |
 | `attach.sh` | Fast re-attach to the running session (no rebuild). |
 | `update.sh` | Pulls a newer template into the project; `--check` reports whether one exists. |
@@ -155,13 +160,13 @@ change; otherwise it reuses the existing container. It also prints a one-line
 notice when a newer template exists (see [Updating](#updating)). The tmux session
 (and the Claude login, via the `claude-shared` volume) persists across
 disconnects and rebuilds, so you can detach, reconnect from another machine, and
-pick up exactly where you left off. Set `TMUX_WINDOWS=N` in the environment to override the
-window count for a single run.
+pick up exactly where you left off. Set `TMUX_WINDOWS=N` in the environment to
+override the window count for a single run.
 
 The `claude-shared` volume is global — every project installed from this
 template mounts the same one, so a single `/login` in any devcontainer
-authenticates them all. `start.sh` creates the volume on first run; if you
-bypass `start.sh` (e.g. VS Code's "Reopen in Container"), create it once with
+authenticates them all. `start.sh` creates the volume on first run; if you bring
+the container up some other way, create it once with
 `docker volume create claude-shared`.
 
 ## Updating

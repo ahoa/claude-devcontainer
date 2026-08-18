@@ -33,18 +33,18 @@ TRACK_REF="${CLAUDE_DEVCONTAINER_TRACK_REF:-$REPO_REF}"
 # because nothing in it is meant to be edited by hand. Always (re)written, so a
 # re-run picks up template changes.
 HIDDEN_FILES=(
+    devcontainer.json
+    devcontainer-lock.json
     Dockerfile
     docker-compose.yml
     init-firewall.sh
     tmux.conf
 )
-# Template-owned but visible, for two different reasons: the three scripts are the
-# commands you actually run, and the two devcontainer files have to sit at exactly
-# .devcontainer/devcontainer.json (with its lock beside it) for VS Code and the
-# devcontainer CLI to find them. Also always (re)written.
+# Template-owned but visible, because these three are the commands you run. They
+# pass --config to the devcontainer CLI, which is what lets devcontainer.json live
+# in .template/ instead of at the path the CLI would discover on its own. Also
+# always (re)written.
 VISIBLE_TEMPLATE_FILES=(
-    devcontainer.json
-    devcontainer-lock.json
     start.sh
     attach.sh
     update.sh
