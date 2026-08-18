@@ -292,6 +292,31 @@ docker volume create claude-shared
 docker run --rm -v <project>_claude:/from -v claude-shared:/to alpine cp -a /from/. /to
 ```
 
+## Platforms
+
+The same install works from a macOS host (Docker Desktop or OrbStack) and a Linux
+host (Docker Engine), on x86-64 and arm64. The parts that would otherwise differ:
+
+- **Reaching the host.** `host.docker.internal` is published by Docker Desktop and
+  OrbStack but not by Docker Engine on Linux, so the compose file declares
+  `extra_hosts: host.docker.internal:host-gateway`. Docker fills in the right
+  address; where the runtime already provides the name, its own mapping wins. The
+  firewall then allows whatever it resolves to, assuming nothing about the value.
+- **File ownership.** On Linux a bind-mounted file keeps the host's UID, which would
+  not match the container's `dev` user. The devcontainer CLI remaps the container
+  user's UID/GID to yours by default (`--update-remote-user-uid-default on`), so
+  this needs no configuration. On macOS the runtime translates ownership anyway.
+- **Architecture.** The base image, NodeSource and Debian's JDK all cover amd64 and
+  arm64, and `JAVA_HOME` is derived from `javac`'s real path rather than a
+  hardcoded `-arm64`/`-amd64` directory.
+- **Host scripts.** They stick to what both BSD and GNU userlands have: `sed -i.bak`
+  works on both, and the build-input hash falls back from `sha256sum` to
+  `shasum -a 256` where coreutils is absent.
+
+Not covered: rootless Docker on Linux puts the socket somewhere other than
+`/var/run/docker.sock`, so the mount in `.template/docker-compose.yml` needs
+adjusting there.
+
 ## Requirements
 
 - Docker (with Compose v2)

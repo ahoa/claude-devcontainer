@@ -15,6 +15,13 @@ services:
     cap_add:
       - NET_ADMIN
       - NET_RAW
+    # Docker Desktop and OrbStack publish host.docker.internal themselves; plain
+    # Docker Engine on Linux does not, and without it init-firewall.sh finds no host
+    # address to allow and the container cannot reach the application running on the
+    # host. `host-gateway` makes Docker fill in the right address. Harmless where the
+    # runtime already provides the name — its own mapping wins.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # Two levels up from .devcontainer/.template/ is the project root.
       - ../..:/workspace:cached

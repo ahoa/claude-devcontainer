@@ -68,7 +68,14 @@ BUILD_INPUTS=(
     "$SCRIPT_DIR/domains.conf"
     "$SCRIPT_DIR/docker-compose.override.yml"
 )
-BUILD_HASH="$(cat "${BUILD_INPUTS[@]}" 2>/dev/null | sha256sum | cut -d' ' -f1)"
+# sha256sum is GNU coreutils; macOS only started shipping it recently, and shasum is
+# what is always there. Either way the hash only has to be stable, not standard.
+if command -v sha256sum >/dev/null 2>&1; then
+    SHA_CMD=(sha256sum)
+else
+    SHA_CMD=(shasum -a 256)
+fi
+BUILD_HASH="$(cat "${BUILD_INPUTS[@]}" 2>/dev/null | "${SHA_CMD[@]}" | cut -d' ' -f1)"
 HASH_FILE="$SCRIPT_DIR/.build-hash"
 
 # --config points at the hidden devcontainer.json; without it the CLI would look
