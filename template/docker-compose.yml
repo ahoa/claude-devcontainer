@@ -8,30 +8,15 @@ name: __PROJECT_NAME__
 services:
   devcontainer:
     build:
-      # Context is .devcontainer/ so the build can read the user-owned files that
-      # sit beside this hidden directory (tools.sh, domains.conf).
       context: ..
       dockerfile: .template/Dockerfile
     cap_add:
       - NET_ADMIN
       - NET_RAW
-    # Docker Desktop and OrbStack publish host.docker.internal themselves; plain
-    # Docker Engine on Linux does not, and without it init-firewall.sh finds no host
-    # address to allow and the container cannot reach the application running on the
-    # host. `host-gateway` makes Docker fill in the right address. Harmless where the
-    # runtime already provides the name — its own mapping wins.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      # Two levels up from .devcontainer/.template/ is the project root.
       - ../..:/workspace:cached
-      # Claude's login token + global config. `claude-shared` is ONE fixed-name
-      # volume used by every project installed from this template, so a single
-      # /login authenticates all devcontainers. It also survives rebuilds:
-      # start.sh passes --remove-existing-container on build-input changes,
-      # which wipes the container fs. CLAUDE_CONFIG_DIR (set in the Dockerfile)
-      # points all of Claude's state — .credentials.json AND .claude.json —
-      # into this directory.
       - claude:/home/dev/.claude
       # Host Docker daemon socket (docker-outside-of-docker) — lets this container
       # drive the host daemon. Remove this line if the container needs no Docker.
@@ -40,9 +25,5 @@ services:
 
 volumes:
   claude:
-    # Fixed name (not <project>_claude) so all projects share one login.
-    # Declared external because compose warns when reusing a same-named volume
-    # created by another compose project; start.sh creates it up front
-    # (`docker volume create` is idempotent).
     name: claude-shared
     external: true
