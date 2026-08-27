@@ -104,11 +104,19 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     && ln -s "$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")" /usr/lib/jvm/current
 ENV JAVA_HOME=/usr/lib/jvm/current
 
-# Project toolchain — anything beyond Node and Java. It lives in tools.sh rather
-# than in RUN lines here, because this Dockerfile belongs to the template and is
-# overwritten on update, while tools.sh is yours and is not. Kept last so editing
-# it invalidates no earlier layer, and dropped afterwards so the image does not
-# ship the script itself.
+# ── Playwright + headless Chromium ───────────────────────────────────────────
+ENV PLAYWRIGHT_VERSION=1.62.1
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN npx --yes "playwright@${PLAYWRIGHT_VERSION}" install --with-deps --only-shell chromium \
+    && chown -R dev:dev /ms-playwright \
+    && rm -rf /root/.npm \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Project toolchain — anything beyond Node, Java and Playwright. It lives in
+# tools.sh rather than in RUN lines here, because this Dockerfile belongs to the
+# template and is overwritten on update, while tools.sh is yours and is not.
+# Kept last so editing it invalidates no earlier layer, and dropped afterwards so
+# the image does not ship the script itself.
 COPY tools.sh /tmp/tools.sh
 RUN chmod +x /tmp/tools.sh && /tmp/tools.sh && rm -f /tmp/tools.sh
 

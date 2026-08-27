@@ -13,10 +13,11 @@
 # template and IS overwritten; that is why it says so at the top of each file
 # and why the bulk of it is tucked away in .template/.
 #
-# The base image already has Node and Java, both on their current LTS line, plus
-# ca-certificates, curl, git, zsh, tmux, sudo, tzdata and the firewall tooling.
-# Anything else — Python, a database client, a linter — goes below. The base image
-# build removes /var/lib/apt/lists, so run `apt-get update` before installing.
+# The base image already has Node and Java, both on their current LTS line,
+# Playwright's headless Chromium with its system libraries, plus ca-certificates,
+# curl, git, zsh, tmux, sudo, tzdata and the firewall tooling. Anything else —
+# Python, a database client, a linter — goes below. The base image build removes
+# /var/lib/apt/lists, so run `apt-get update` before installing.
 set -euo pipefail
 
 # Example — Python:
