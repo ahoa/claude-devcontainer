@@ -97,9 +97,12 @@ echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | aggregate -q | add_cidrs "G
 # current, and the project's own additions, which they never touch.
 for CONF in /usr/local/bin/domains-base.conf /usr/local/bin/domains.conf; do
     [[ -f "$CONF" ]] || continue
-    while IFS= read -r domain; do
-        [[ -z "$domain" || "$domain" =~ ^# ]] && continue
-        domain=$(echo "$domain" | xargs)
+    # `|| [[ -n "$domain" ]]` picks up a last line with no trailing newline, which
+    # read reports as EOF and would otherwise drop silently.
+    while IFS= read -r domain || [[ -n "$domain" ]]; do
+        domain="${domain%%#*}"                  # drop comments, whole-line or trailing
+        domain=$(echo "$domain" | xargs)        # then trim what is left
+        [[ -z "$domain" ]] && continue
         ips=$(dig +short "$domain" 2>/dev/null | grep -E '^[0-9]+\.' || true)
         if [[ -z "$ips" ]]; then
             echo "WARNING: $domain (from $(basename "$CONF")) did not resolve — not allowed"

@@ -100,17 +100,21 @@ fetch_remote_sha() {
         "$api/commits/$TEMPLATE_REF" 2>/dev/null | cut -c1-7
 }
 
-# Reuse the cached SHA while it is fresh; a failed refresh falls back to whatever
-# is cached, so being offline degrades to "no news" rather than an error.
+# The cache exists so that --check on every start.sh is free. Only --check may read
+# it: an explicit ./update.sh must never decide "already up to date" from a SHA that
+# is up to a day old — that is how a freshly pushed template silently fails to
+# arrive. A failed refresh falls back to whatever is cached, so being offline
+# degrades to "no news" rather than an error.
 REMOTE_SHA=""
-if [[ -n "$REF_OVERRIDE" ]]; then
-    REMOTE_SHA="$(fetch_remote_sha || true)"          # explicit ref: never cached
-elif [[ -n "$(find "$CACHE" -mmin "-$CACHE_MAX_AGE_MIN" 2>/dev/null)" ]]; then
+if [[ $CHECK_ONLY -eq 1 && -z "$REF_OVERRIDE" && -n "$(find "$CACHE" -mmin "-$CACHE_MAX_AGE_MIN" 2>/dev/null)" ]]; then
     REMOTE_SHA="$(cat "$CACHE" 2>/dev/null || true)"
 else
     REMOTE_SHA="$(fetch_remote_sha || true)"
-    [[ -n "$REMOTE_SHA" ]] && echo "$REMOTE_SHA" > "$CACHE"
-    [[ -z "$REMOTE_SHA" ]] && REMOTE_SHA="$(cat "$CACHE" 2>/dev/null || true)"
+    # An explicit ref is not what the cache tracks, so it neither fills nor reads it.
+    if [[ -z "$REF_OVERRIDE" ]]; then
+        [[ -n "$REMOTE_SHA" ]] && echo "$REMOTE_SHA" > "$CACHE"
+        [[ -z "$REMOTE_SHA" ]] && REMOTE_SHA="$(cat "$CACHE" 2>/dev/null || true)"
+    fi
 fi
 
 if [[ -z "$REMOTE_SHA" ]]; then
