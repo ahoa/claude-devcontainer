@@ -261,36 +261,57 @@ dest_path() {
     echo "$DEST/$1"
 }
 
-# Which template commit this install came from — recorded in .devcontainer/ so
+# git@github.com:owner/repo.git and https://github.com/owner/repo name the same
+# repo. Reduce either form to "github.com/owner/repo", so the two compare equal.
+normalize_repo_url() {
+    local u="${1%.git}"
+    u="${u#ssh://}"; u="${u#https://}"; u="${u#http://}"; u="${u#git@}"
+    echo "${u/://}"
+}
+
+# Which commit of $REPO_URL this install came from — recorded in .devcontainer/ so
 # update.sh knows what to compare against. Prints a short SHA, or nothing when it
 # cannot be established.
+#
+# The SHA must name a commit in the repo we install FROM, because that repo is the
+# only one update.sh ever compares against. A local checkout's HEAD is not that
+# commit: the checkout can be dirty, unpushed or behind, and the stamp then pairs
+# $REPO_URL with a SHA that repo does not have — which makes every later
+# comparison meaningless. So resolve the ref against the source repo itself,
+# from a checkout and from a download alike.
 resolve_template_sha() {
-    local sha=""
-
-    # Running from a checkout: that checkout's HEAD is the answer. A dirty tree is
-    # marked, since the installed files then match no published commit.
-    if [[ -z "$FETCHED_DIR" ]] && sha="$(git -C "$SCRIPT_DIR" rev-parse --short=7 HEAD 2>/dev/null)"; then
-        if [[ -n "$(git -C "$SCRIPT_DIR" status --porcelain 2>/dev/null)" ]]; then
-            sha="$sha-dirty"
-        fi
-        echo "$sha"
-        return 0
-    fi
-
-    # Downloaded: a full SHA as the ref is already the answer; otherwise resolve
-    # the ref through the API. The `sha` media type returns the bare SHA as plain
-    # text, so this needs neither gh nor jq.
+    # An exact SHA as the ref is already the answer. update.sh pins one when it
+    # re-runs this installer.
     if [[ "$REPO_REF" =~ ^[0-9a-f]{7,40}$ ]]; then
         echo "${REPO_REF:0:7}"
         return 0
     fi
+
+    # Ask the source repo. The `sha` media type returns the bare SHA as plain
+    # text, so this needs neither gh nor jq.
+    local sha=""
     case "$REPO_URL" in
         https://github.com/*)
-            curl -fsSL -m 5 -H 'Accept: application/vnd.github.sha' \
+            sha="$(curl -fsSL -m 5 -H 'Accept: application/vnd.github.sha' \
                 "https://api.github.com/repos/${REPO_URL#https://github.com/}/commits/$REPO_REF" \
-                2>/dev/null | cut -c1-7
+                2>/dev/null | cut -c1-7)"
             ;;
     esac
+    if [[ -n "$sha" ]]; then
+        echo "$sha"
+        return 0
+    fi
+
+    # No answer from the network — the API is unreachable or rate-limited. A
+    # checkout of the source repo still holds one: its remote-tracking ref, as of
+    # the last fetch. That is the source repo's SHA, never the local HEAD. The
+    # origin URL must match $REPO_URL, or the checkout tracks a different repo
+    # and its refs say nothing about the one we install from.
+    if [[ -z "$FETCHED_DIR" ]] \
+       && [[ "$(normalize_repo_url "$(git -C "$SCRIPT_DIR" remote get-url origin 2>/dev/null)")" \
+             == "$(normalize_repo_url "$REPO_URL")" ]]; then
+        git -C "$SCRIPT_DIR" rev-parse --short=7 "refs/remotes/origin/$REPO_REF" 2>/dev/null || true
+    fi
 }
 
 # Prints each existing Docker object that would collide with the given name.
