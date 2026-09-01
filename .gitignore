@@ -1,2 +1,14 @@
 # JetBrains IDE project files.
 .idea/
+
+# claude-agents: ephemeral artifacts + local config
+/.cross-review-tmp/
+cost.md
+WORKING-CONTEXT.md
+.mcp.json
+/.claude/latest-sha
+/.claude/plugin-synced-version
+
+# claude-agents: ephemeral artifacts + local config
+/.claude/latest-version
+/.claude/plugin-synced-files

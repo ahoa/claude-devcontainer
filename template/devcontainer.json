@@ -22,7 +22,8 @@
     "ghcr.io/aivar-codeborne/devcontainer-features/claude:1.0.7": {},
     "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
       "moby": false
-    }
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {}
   },
   "overrideFeatureInstallOrder": [
     "ghcr.io/devcontainers/features/common-utils:2"
