@@ -17,13 +17,20 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ../..:/workspace:cached
+      # Claude's login and config. The volume it points at is named at install
+      # time: claude-shared, which every project from this template mounts, or a
+      # volume of this project's own. See the volumes section at the end.
       - claude:/home/dev/.claude
-      # Host Docker daemon socket (docker-outside-of-docker) — lets this container
-      # drive the host daemon. Remove this line if the container needs no Docker.
-      - /var/run/docker.sock:/var/run/docker.sock
+      # The host Docker daemon socket, mounted only when the install asked for it
+      # (--docker on, which is the default). It lets this container drive the host
+      # daemon, and that by itself amounts to control of the host — see the
+      # security notes in the README. The installer substitutes the line below.
+      __DOCKER_SOCK_MOUNT__
     command: sleep infinity
 
 volumes:
   claude:
-    name: claude-shared
+    # claude-shared, or <project>_claude — the installer asks and substitutes.
+    # start.sh creates it before compose looks for it.
+    name: __CLAUDE_VOLUME__
     external: true

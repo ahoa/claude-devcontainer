@@ -6,7 +6,9 @@
 # Prompts for a project name (used for the Docker image / compose project /
 # named volumes) and verifies it does not collide with anything Docker already
 # knows about, then asks how many tmux windows (each running its own Claude) the
-# session should open and which timezone the container's clock should use.
+# session should open, which timezone the container's clock should use, whether
+# Claude's login is shared with the other projects or belongs to this one, and
+# whether the container gets the host Docker socket.
 # Copies the template files, substituting those choices.
 #
 # Works both from a checkout and standalone (curl … | bash): when there is no
@@ -82,6 +84,13 @@ Options:
   --name NAME       Project name (lowercase [a-z0-9][a-z0-9_-]*). Prompted if omitted.
   --windows N       Number of tmux windows to open (each runs a Claude). Default 1.
   --timezone ZONE   IANA timezone for the container clock. Default Europe/Tallinn.
+  --login MODE      Where Claude's login lives: 'shared' (one login for every
+                    project from this template) or 'project' (a login of this
+                    project's own). Default shared. Prompted if omitted.
+  --docker MODE     'on' mounts the host Docker socket into the container, which
+                    also gives it control of the host. 'off' leaves it out, and
+                    drops the docker-outside-of-docker feature with it. Default
+                    on. Prompted if omitted.
   --force           Overwrite an existing .devcontainer/ and ignore name conflicts.
   -h, --help        Show this help.
 
@@ -102,6 +111,10 @@ NAME_FROM_ARG=0
 TMUX_WINDOWS=""
 TIMEZONE=""
 TZ_FROM_ARG=0
+CLAUDE_LOGIN=""
+LOGIN_FROM_ARG=0
+DOCKER_SOCKET=""
+DOCKER_FROM_ARG=0
 TARGET_DIR=""
 FORCE=0
 # Timezone offered when the prompt is accepted with Enter, and used verbatim in a
@@ -115,6 +128,10 @@ while [[ $# -gt 0 ]]; do
         --windows=*) TMUX_WINDOWS="${1#*=}"; shift ;;
         --timezone)  TIMEZONE="${2:-}"; TZ_FROM_ARG=1; shift 2 ;;
         --timezone=*) TIMEZONE="${1#*=}"; TZ_FROM_ARG=1; shift ;;
+        --login)     CLAUDE_LOGIN="${2:-}"; LOGIN_FROM_ARG=1; shift 2 ;;
+        --login=*)   CLAUDE_LOGIN="${1#*=}"; LOGIN_FROM_ARG=1; shift ;;
+        --docker)    DOCKER_SOCKET="${2:-}"; DOCKER_FROM_ARG=1; shift 2 ;;
+        --docker=*)  DOCKER_SOCKET="${1#*=}"; DOCKER_FROM_ARG=1; shift ;;
         --force)     FORCE=1; shift ;;
         -h|--help)   usage; exit 0 ;;
         --)          shift; break ;;
@@ -201,6 +218,9 @@ validate_name() {
 # zoneinfo (or a zone only the container knows) falls back to a format check.
 validate_timezone() {
     [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*(/[A-Za-z0-9._+-]+)*$ ]] || return 1
+    # The name becomes a symlink target in the image (/usr/share/zoneinfo/$TZ),
+    # so it must not walk out of that directory.
+    [[ "$1" != *..* ]] || return 1
     if [[ -d /usr/share/zoneinfo ]]; then
         [[ -f "/usr/share/zoneinfo/$1" ]] || return 1
     fi
@@ -231,12 +251,15 @@ detect_existing_answers() {
     local dest="$TARGET_DIR/.devcontainer"
     local stamp="$dest/.template-version"
     local f
+    local vol
     [[ -d "$dest" ]] || return 0
 
     if [[ -f "$stamp" ]]; then
         EXISTING_NAME="$(sed -n 's/^PROJECT_NAME=//p'  "$stamp" | head -1)"
         EXISTING_WINDOWS="$(sed -n 's/^TMUX_WINDOWS=//p' "$stamp" | head -1)"
         EXISTING_TIMEZONE="$(sed -n 's/^TIMEZONE=//p'    "$stamp" | head -1)"
+        EXISTING_LOGIN="$(sed -n 's/^CLAUDE_LOGIN=//p'   "$stamp" | head -1)"
+        EXISTING_DOCKER="$(sed -n 's/^DOCKER_SOCKET=//p'  "$stamp" | head -1)"
     fi
 
     for f in "$dest/.template/docker-compose.yml" "$dest/docker-compose.yml"; do
@@ -250,6 +273,28 @@ detect_existing_answers() {
         [[ -z "$EXISTING_TIMEZONE" && -f "$f" ]] || continue
         EXISTING_TIMEZONE="$(sed -n 's/^ENV TZ=//p' "$f" | head -1)"
     done
+    # An install from before this question existed shares one login volume, and
+    # its start.sh holds no CLAUDE_VOLUME line at all.
+    if [[ -z "$EXISTING_LOGIN" && -f "$dest/start.sh" ]]; then
+        vol="$(sed -n 's/^CLAUDE_VOLUME="\(.*\)"$/\1/p' "$dest/start.sh" | head -1)"
+        if [[ -z "$vol" || "$vol" == "claude-shared" ]]; then
+            EXISTING_LOGIN="shared"
+        else
+            EXISTING_LOGIN="project"
+        fi
+    fi
+    # Every install from before this question existed mounted the socket.
+    if [[ -z "$EXISTING_DOCKER" ]]; then
+        for f in "$dest/.template/docker-compose.yml" "$dest/docker-compose.yml"; do
+            [[ -f "$f" ]] || continue
+            if grep -q '/var/run/docker\.sock' "$f"; then
+                EXISTING_DOCKER="on"
+            else
+                EXISTING_DOCKER="off"
+            fi
+            break
+        done
+    fi
 }
 
 # Where a template file is installed: machinery is tucked into .template/,
@@ -327,9 +372,10 @@ list_conflicts() {
     if docker compose ls --all 2>/dev/null | awk 'NR>1{print $1}' | grep -qx "$n"; then
         echo "  - docker compose project '$n'"; found=1
     fi
-    # The Claude login/config volume is deliberately NOT checked: it has a fixed
-    # name (claude-shared) shared across all projects, so an existing one is
-    # expected, not a conflict. The compose file declares no per-project volumes of
+    # The Claude login/config volume is deliberately NOT checked. Under the shared
+    # choice its name is fixed (claude-shared) and every project mounts it; under
+    # the project choice an existing <project>_claude volume holds the very login
+    # this install goes on using. Either way it is expected, not a conflict. The compose file declares no per-project volumes of
     # its own (the Claude devcontainer feature does create one, named after the
     # compose project, but it is disposable and reappears on the next `up`).
     #
@@ -432,6 +478,8 @@ migrate_claude_volume() {
 EXISTING_NAME=""
 EXISTING_WINDOWS=""
 EXISTING_TIMEZONE=""
+EXISTING_LOGIN=""
+EXISTING_DOCKER=""
 detect_existing_answers
 if [[ -n "$EXISTING_NAME" ]]; then
     echo "Found an existing install in $TARGET_DIR/.devcontainer — its answers are the defaults below."
@@ -509,6 +557,61 @@ while :; do
     TIMEZONE=""
 done
 
+# ── Where Claude's login lives ────────────────────────────────────────────────
+# shared  — one claude-shared volume, mounted by every project installed from this
+#           template, so a single /login covers all of them. It also means the
+#           container of any one project reads the token that all the others use.
+# project — a volume of this project's own. A second /login to do, and a repo you
+#           do not trust cannot read the credentials of the rest.
+while :; do
+    if [[ -z "$CLAUDE_LOGIN" ]]; then
+        prompt_user CLAUDE_LOGIN "Claude login shared with your other projects, or this project only? [shared/project, ${EXISTING_LOGIN:-shared}]: " || true
+        CLAUDE_LOGIN="${CLAUDE_LOGIN:-${EXISTING_LOGIN:-shared}}"
+    fi
+
+    [[ "$CLAUDE_LOGIN" == "shared" || "$CLAUDE_LOGIN" == "project" ]] && break
+
+    echo "Answer 'shared' or 'project' (got '$CLAUDE_LOGIN')." >&2
+    if [[ $LOGIN_FROM_ARG -eq 1 ]] || ! have_tty; then exit 1; fi
+    CLAUDE_LOGIN=""
+done
+# The project-scoped name is the one the pre-shared-login template used, so a
+# project that still has that volume keeps its login with nothing to migrate.
+if [[ "$CLAUDE_LOGIN" == "shared" ]]; then
+    CLAUDE_VOLUME="claude-shared"
+else
+    CLAUDE_VOLUME="${PROJECT_NAME}_claude"
+fi
+
+# ── The host Docker socket ────────────────────────────────────────────────────
+# on  — the container drives the host Docker daemon, which tests that start their
+#       own containers need. It is also control of the host: a container that can
+#       reach that socket can start a privileged one, so this is the loosest part
+#       of the sandbox by a wide margin.
+# off — no socket and no docker-outside-of-docker feature. Nothing in the
+#       container can reach Docker.
+while :; do
+    if [[ -z "$DOCKER_SOCKET" ]]; then
+        prompt_user DOCKER_SOCKET "Mount the host Docker socket? It gives the container control of the host. [on/off, ${EXISTING_DOCKER:-on}]: " || true
+        DOCKER_SOCKET="${DOCKER_SOCKET:-${EXISTING_DOCKER:-on}}"
+    fi
+
+    [[ "$DOCKER_SOCKET" == "on" || "$DOCKER_SOCKET" == "off" ]] && break
+
+    echo "Answer 'on' or 'off' (got '$DOCKER_SOCKET')." >&2
+    if [[ $DOCKER_FROM_ARG -eq 1 ]] || ! have_tty; then exit 1; fi
+    DOCKER_SOCKET=""
+done
+# Both placeholders sit on a line of their own in the template, so the comment
+# form is what an "off" install reads in .devcontainer/.template/.
+if [[ "$DOCKER_SOCKET" == "on" ]]; then
+    DOCKER_SOCK_MOUNT="- /var/run/docker.sock:/var/run/docker.sock"
+    DOCKER_FEATURE='"ghcr.io/devcontainers/features/docker-outside-of-docker:1": { "moby": false },'
+else
+    DOCKER_SOCK_MOUNT="# not mounted — this project was installed with --docker off"
+    DOCKER_FEATURE='// not installed — this project was installed with --docker off'
+fi
+
 # ── Install ──────────────────────────────────────────────────────────────────
 DEST="$TARGET_DIR/.devcontainer"
 if [[ -e "$DEST" && $FORCE -ne 1 ]]; then
@@ -546,6 +649,9 @@ for f in "${TEMPLATE_FILES[@]}"; do
         -e "s|__PROJECT_NAME__|$PROJECT_NAME|g" \
         -e "s|__TMUX_WINDOWS__|$TMUX_WINDOWS|g" \
         -e "s|__TIMEZONE__|$TIMEZONE|g" \
+        -e "s|__CLAUDE_VOLUME__|$CLAUDE_VOLUME|g" \
+        -e "s|__DOCKER_SOCK_MOUNT__|$DOCKER_SOCK_MOUNT|g" \
+        -e "s|__DOCKER_FEATURE__|$DOCKER_FEATURE|g" \
         "$dest"
     rm -f "$dest.bak"
 done
@@ -576,11 +682,17 @@ TEMPLATE_REF=$TRACK_REF
 PROJECT_NAME=$PROJECT_NAME
 TMUX_WINDOWS=$TMUX_WINDOWS
 TIMEZONE=$TIMEZONE
+CLAUDE_LOGIN=$CLAUDE_LOGIN
+DOCKER_SOCKET=$DOCKER_SOCKET
 EOF
 
-# Carry an old per-project Claude login over to the shared volume (no-op on
-# fresh installs and when the shared volume is already logged in).
-migrate_claude_volume
+# Carry an old per-project Claude login over to the shared volume (no-op on fresh
+# installs and when the shared volume is already logged in). Only for the shared
+# choice — a project-scoped login goes on using that same <project>_claude volume,
+# so there is nothing to move.
+if [[ "$CLAUDE_LOGIN" == "shared" ]]; then
+    migrate_claude_volume
+fi
 
 cat <<EOF
 
@@ -588,6 +700,8 @@ cat <<EOF
     project name : $PROJECT_NAME
     tmux windows : $TMUX_WINDOWS
     timezone     : $TIMEZONE
+    claude login : $CLAUDE_LOGIN (volume $CLAUDE_VOLUME)
+    docker socket: $DOCKER_SOCKET
 EOF
 
 if [[ ${#KEPT_FILES[@]} -gt 0 ]]; then

@@ -14,6 +14,16 @@ TEMPLATE_DIR="$SCRIPT_DIR/.template"
 # Claude). Set at install time; override at run time with TMUX_WINDOWS=N.
 WINDOWS="${TMUX_WINDOWS:-__TMUX_WINDOWS__}"
 
+# Both values below are pasted into a shell command that runs in the container
+# (see the last line of this script), so both are checked first. Without the
+# check, `TMUX_WINDOWS='1; curl … | sh'` ran that command, and a worktree name
+# that held a quote closed the quoting and did the same. The installer validates
+# the number it writes above, but not what the environment overrides it with.
+if [[ ! "$WINDOWS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ERROR: TMUX_WINDOWS must be a positive integer (got '$WINDOWS')." >&2
+    exit 1
+fi
+
 # Pin the compose project name from docker-compose.yml's top-level `name:` so
 # `devcontainer exec` looks up the container under the same project name that
 # `start.sh`'s `devcontainer up` created it under. See start.sh for details.
@@ -34,6 +44,10 @@ for arg in "$@"; do
         *)           WORKTREE_NAME="$arg" ;;
     esac
 done
+if [[ -n "$WORKTREE_NAME" && ! "$WORKTREE_NAME" =~ ^[A-Za-z0-9_.][A-Za-z0-9_./-]*$ ]]; then
+    echo "ERROR: worktree name may hold letters, digits, '.', '_', '-' and '/' only (got '$WORKTREE_NAME')." >&2
+    exit 1
+fi
 
 # Fast path — assumes start.sh has already brought the container up and
 # installed the devcontainer CLI locally. Errors out cleanly if either is missing.

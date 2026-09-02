@@ -30,5 +30,12 @@
 #   # machine on the LAN reaching a published port
 #   iptables -A INPUT -s 10.10.10.0/24 -p tcp --dport 5173 -j ACCEPT
 #
+# IPv6 is closed as a whole before this file is sourced, because every rule the
+# template writes is IPv4. An `ip6tables` rule added here survives that and takes
+# effect, in the same way an iptables rule does: it lands before the catch-all
+# reject, which is appended after this file has run.
+#
 # Beware that `set -euo pipefail` is in force, so a failing command aborts the
-# firewall setup and the container will not finish starting.
+# firewall setup. The container then closes its network and does not finish
+# starting, rather than run on with the rules half applied. Fix the cause, then
+# run `sudo /usr/local/bin/init-firewall.sh` to apply them again.

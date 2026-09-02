@@ -14,11 +14,19 @@ add_cidrs() {
     # Reads CIDRs from stdin, validates, and adds to ipset
     while read -r cidr; do
         if [[ ! "$cidr" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$ ]]; then
-            echo "ERROR: Invalid CIDR range from $label: $cidr"
-            exit 1
+            # Skipped, not fatal. The GitHub list carries IPv6 ranges too, and one
+            # range this firewall cannot use must not turn the whole firewall off —
+            # which is what the `exit 1` here used to do, on the open side of the
+            # setup. A skipped range allows less, never more.
+            echo "WARNING: $label supplied a range this firewall cannot use: $cidr" >&2
+            continue
         fi
         echo "Adding $label range $cidr"
-        ipset add allowed-domains "$cidr" 2>/dev/null || true
+        # -exist makes a repeat a no-op, so a real refusal (a set that is full, an
+        # address ipset rejects) is reported instead of swallowed.
+        if ! ipset add allowed-domains "$cidr" -exist; then
+            echo "WARNING: ipset refused the $label range $cidr — it is not allowed" >&2
+        fi
     done
 }
 
@@ -26,7 +34,9 @@ fetch_json() {
     local url="$1"
     local label="$2"
     local result
-    result=$(curl -s "$url")
+    # -f so an HTTP error page is not mistaken for a body, -m so a hung request
+    # cannot hold the setup open for ever. The caller reports an empty result.
+    result=$(curl -fsS -m 10 "$url" || true)
     if [ -z "$result" ]; then
         echo "ERROR: Failed to fetch $label from $url"
         exit 1
@@ -121,18 +131,102 @@ iptables -P INPUT ACCEPT
 iptables -P OUTPUT ACCEPT
 iptables -P FORWARD ACCEPT
 
-# First allow DNS and localhost before any restrictions
-# Allow outbound DNS
-iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
-# Allow inbound DNS responses
-iptables -A INPUT -p udp --sport 53 -j ACCEPT
-# Allow outbound SSH
-iptables -A OUTPUT -p tcp --dport 22 -j ACCEPT
-# Allow inbound SSH responses
-iptables -A INPUT -p tcp --sport 22 -m state --state ESTABLISHED -j ACCEPT
-# Allow localhost
+# From this point to the DROP policies at the end of the script, the chains are
+# open. Every failure in between used to leave them that way: `set -e` ends the
+# script, the ACCEPT policies stay, and the container runs with no firewall at all.
+# A GitHub API request that timed out was enough. That is the wrong direction to
+# fail in, so close the network instead.
+#
+# The rules go too, not only the policies. A half-applied set of allow rules is
+# not a state worth keeping, and a container with no route out is easier to
+# recognize than one that is quietly too permissive. Recovery needs no network:
+# fix the cause, then run the command this prints.
+fail_closed() {
+    local rc=$?
+    [[ $rc -eq 0 ]] && return 0
+    echo "ERROR: firewall setup failed (exit $rc) — closing this container's network" >&2
+    iptables -P INPUT DROP   2>/dev/null || true
+    iptables -P OUTPUT DROP  2>/dev/null || true
+    iptables -P FORWARD DROP 2>/dev/null || true
+    iptables -F 2>/dev/null || true
+    iptables -X 2>/dev/null || true
+    iptables -A INPUT  -i lo -j ACCEPT 2>/dev/null || true
+    iptables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true
+    echo "The container cannot reach anything now. Fix the cause, then run:" >&2
+    echo "  sudo /usr/local/bin/init-firewall.sh" >&2
+}
+trap fail_closed EXIT
+
+# IPv6, closed as a whole.
+#
+# Every allow rule in this script is IPv4: a host is resolved to its A records,
+# and the ipset holds IPv4 networks. So an IPv6 route out of the container matches
+# no allowlist and walks around all of it — and nothing here touched ip6tables, on
+# any runtime that gives the container IPv6.
+#
+# Closed here, at the same point as the IPv4 flush, and the catch-all REJECT is
+# appended at the end of the script next to the IPv4 one. A rule that firewall.sh
+# adds for IPv6 thus survives this flush and still lands before that REJECT, which
+# is how the IPv4 rules already work.
+#
+# The policies go first, so a partial application still leaves IPv6 closed.
+IPV6_FILTERED=0
+ip6_close() {
+    ip6tables -P INPUT DROP \
+        && ip6tables -P OUTPUT DROP \
+        && ip6tables -P FORWARD DROP \
+        && ip6tables -F \
+        && ip6tables -X \
+        && ip6tables -A INPUT  -i lo -j ACCEPT \
+        && ip6tables -A OUTPUT -o lo -j ACCEPT
+}
+if ! command -v ip6tables >/dev/null 2>&1; then
+    echo "Note: this image has no ip6tables — IPv6 rules skipped"
+elif ip6_close 2>/dev/null; then
+    IPV6_FILTERED=1
+    echo "IPv6 closed: DROP policies, loopback only"
+else
+    echo "WARNING: could not apply the IPv6 rules. If this container has IPv6, egress over it is unfiltered." >&2
+fi
+
+# Localhost first. The container runtime answers DNS on 127.0.0.11, and every
+# rule below needs name resolution.
 iptables -A INPUT -i lo -j ACCEPT
 iptables -A OUTPUT -o lo -j ACCEPT
+
+# DNS, to this container's own resolvers only.
+#
+# An unrestricted `--dport 53` rule used to stand here, and it reached any
+# nameserver on the internet. That is a way out of the sandbox that needs no
+# allowed host and no root: a lookup of secret.attacker.example carries the
+# payload in the name itself, and the answer carries a reply back. Restricting the
+# destination closes the channel and costs nothing, because a container resolves
+# through the resolvers it was given.
+#
+# The addresses are read from /etc/resolv.conf rather than guessed: Docker
+# publishes 127.0.0.11, and Docker Desktop and OrbStack publish an address on the
+# host. tcp/53 goes with it, for an answer too large for one UDP packet — which
+# the old rule pair did not cover at all.
+DNS_SERVERS=$(awk '$1 == "nameserver" {print $2}' /etc/resolv.conf 2>/dev/null \
+    | grep -E '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' | sort -u)
+if [ -z "$DNS_SERVERS" ]; then
+    echo "ERROR: /etc/resolv.conf names no IPv4 resolver — cannot allow DNS"
+    exit 1
+fi
+for ns in $DNS_SERVERS; do
+    echo "Allowing DNS resolver: $ns"
+    iptables -A OUTPUT -p udp -d "$ns" --dport 53 -j ACCEPT
+    iptables -A OUTPUT -p tcp -d "$ns" --dport 53 -j ACCEPT
+    iptables -A INPUT -p udp -s "$ns" --sport 53 -j ACCEPT
+done
+
+# There is deliberately no rule for tcp/22.
+#
+# One used to stand here, and it accepted SSH to every address there is. The whole
+# host list was one step away from useless: `curl https://any.host:22/` went
+# straight out, and an SSH tunnel carried anything else. Git over SSH still works
+# for a host that is allowed, because the allowed-domains rule at the end of this
+# script matches every port on those addresses.
 
 # Inbound ports need no rules of their own. The application under development runs
 # on the host, not in here, and the directly-connected subnets allowed below cover
@@ -222,9 +316,16 @@ iptables -A OUTPUT -m set --match-set allowed-domains dst -j ACCEPT
 # Explicitly REJECT all other outbound traffic for immediate feedback
 iptables -A OUTPUT -j REJECT --reject-with icmp-admin-prohibited
 
+# The same catch-all for IPv6. REJECT and not DROP, so a client that tries IPv6
+# first fails at once and falls back to IPv4 instead of waiting for a timeout.
+if [[ $IPV6_FILTERED -eq 1 ]]; then
+    ip6tables -A OUTPUT -j REJECT --reject-with icmp6-adm-prohibited 2>/dev/null \
+        || echo "WARNING: no IPv6 reject rule — IPv6 egress is dropped, not rejected" >&2
+fi
+
 echo "Firewall configuration complete"
 echo "Verifying firewall rules..."
-if curl --connect-timeout 5 https://example.com >/dev/null 2>&1; then
+if curl --connect-timeout 5 -m 10 https://example.com >/dev/null 2>&1; then
     echo "ERROR: Firewall verification failed - was able to reach https://example.com"
     exit 1
 else
@@ -232,9 +333,19 @@ else
 fi
 
 # Verify GitHub API access
-if ! curl --connect-timeout 5 https://api.github.com/zen >/dev/null 2>&1; then
+if ! curl --connect-timeout 5 -m 10 https://api.github.com/zen >/dev/null 2>&1; then
     echo "ERROR: Firewall verification failed - unable to reach https://api.github.com"
     exit 1
 else
     echo "Firewall verification passed - able to reach https://api.github.com as expected"
+fi
+
+# IPv6, which no allow rule covers. A success here means the whole filter can be
+# walked around over IPv6. A container without IPv6 reports the same failure as a
+# closed one, and for this sandbox both mean the same thing: no way out over IPv6.
+if curl -6 --connect-timeout 5 -m 10 https://example.com >/dev/null 2>&1; then
+    echo "ERROR: Firewall verification failed - reached https://example.com over IPv6"
+    exit 1
+else
+    echo "Firewall verification passed - no IPv6 egress"
 fi

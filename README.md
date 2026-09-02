@@ -15,10 +15,12 @@ Run this in the project you want the devcontainer in:
 curl -fsSL https://github.com/ahoa/claude-devcontainer/raw/main/install.sh | bash
 ```
 
-It asks for a project name (used for the Docker image, compose project and
-volumes), how many tmux windows to open, and the container's timezone. In a
-project that already has a `.devcontainer/`, every question defaults to what that
-install answered, so pressing Enter three times keeps it.
+It asks five things: a project name (used for the Docker image, compose project
+and volumes), how many tmux windows to open, the container's timezone, whether
+Claude's login is shared with your other projects or belongs to this one, and
+whether the container gets the host Docker socket. In a project that already has a
+`.devcontainer/`, every question defaults to what that install answered, so
+pressing Enter five times keeps it.
 
 Prompts are read from your terminal rather than stdin, so the interactive flow
 works through the pipe. ([Read the script first](install.sh) if you'd rather not
@@ -34,6 +36,8 @@ other than the current directory:
 | `--name NAME` | Project name, lowercase `[a-z0-9][a-z0-9_-]*` |
 | `--windows N` | tmux windows, each running its own Claude (default `1`) |
 | `--timezone ZONE` | IANA timezone for the container clock (default `Europe/Tallinn`) |
+| `--login MODE` | `shared` (default) — one Claude login for every project from this template — or `project`, a login of this project's own |
+| `--docker MODE` | `on` (default) mounts the host Docker socket, which also gives the container control of the host. `off` leaves the socket out and drops the `docker-outside-of-docker` feature with it |
 | `--force` | Overwrite an existing `.devcontainer/` and reuse conflicting Docker objects |
 
 | Env var | Meaning |
@@ -57,10 +61,14 @@ TMUX_WINDOWS=3 ./.devcontainer/start.sh   # override the window count for one ru
 session and the Claude login persist across disconnects and rebuilds, so you can
 detach, reconnect from another machine, and pick up where you left off.
 
-The login lives in one `claude-shared` Docker volume that **every** project from
-this template mounts, so a single `/login` authenticates them all. `start.sh`
-creates it; if you bring the container up some other way, run
-`docker volume create claude-shared` once.
+Where that login lives is the fourth install question. `shared` puts it in one
+`claude-shared` Docker volume that **every** project from this template mounts, so
+a single `/login` authenticates them all — which also means any one project's
+container can read the token all the others use. `project` gives this project a
+`<name>_claude` volume of its own: one more `/login` to do, and a repo you do not
+trust cannot reach the other projects' credentials. `start.sh` creates whichever
+volume the install chose. If you bring the container up some other way, run
+`docker volume create <that name>` once.
 
 ## Configuration
 
@@ -139,11 +147,10 @@ them. Fine for an experiment; fork the template for anything you want to keep.
 | `openjdk-25-jdk-headless` | `.template/Dockerfile` | JDK package; another LTS, or `jre` for a smaller image |
 | `PLAYWRIGHT_VERSION` | `.template/Dockerfile` | Playwright release whose headless Chromium is baked in (currently `1.62.1`). Drop the whole `RUN` line to save ~680 MB in a project that never runs browser tests |
 | `ENV` block | `.template/Dockerfile` | `CLAUDE_CONFIG_DIR`, `SHELL`, `LANG`, `COLORTERM`, `DISABLE_AUTOUPDATER` |
-| `docker.sock` mount | `.template/docker-compose.yml` | Lets the container drive the host Docker daemon — needed for tests that start containers. Drop the line if you never do that. |
 | `extra_hosts` | `.template/docker-compose.yml` | Makes `host.docker.internal` exist on Linux Docker Engine |
 | `domains-base.conf` | `.template/` | Baseline outbound hosts; template-owned so updates can extend it |
 | `tmux.conf` | `.template/` | Prefix, mouse, scrollback, truecolor, clipboard, copy mode |
-| Feature list | `.template/devcontainer.json` + lock | `common-utils`, Claude, `docker-outside-of-docker`, pinned by digest |
+| Feature list | `.template/devcontainer.json` + lock | `common-utils`, Claude, `github-cli`, pinned by digest. `docker-outside-of-docker` joins them when the install answered `--docker on` |
 | `--dangerously-skip-permissions` | `start.sh`, `attach.sh` | How Claude is launched |
 
 To make such a change permanent, fork this repo and install from the fork — it is
@@ -159,7 +166,7 @@ CLAUDE_DEVCONTAINER_REPO=https://github.com/you/your-fork ./install.sh --name my
 |------|-----------------------|
 | `.devcontainer/.build-hash` | Next `start.sh` does a clean rebuild. Gitignored. |
 | `.devcontainer/.update-check` | Next update check fetches the remote SHA instead of the day-old cache. Gitignored. |
-| `claude-shared` volume | Discards the Claude login shared by all projects. |
+| The login volume (`claude-shared`, or `<name>_claude`) | Discards the Claude login it holds. |
 
 ## Updating
 
@@ -210,8 +217,10 @@ template had no marker saying which lines were the project's.
 Handled for you: `allowed-domains.conf` is renamed to `domains.conf` with entries
 intact, and the old `OPEN_PORTS`/`PORT_FORWARDS` arrays are reported rather than
 carried over — neither is needed any more. A per-project `<project>_claude` volume
-from the pre-shared-login era is copied into `claude-shared`, and can be removed
-with `docker volume rm <project>_claude` once the new setup works. Delete the
+from the pre-shared-login era is copied into `claude-shared` when you choose the
+shared login, and can be removed with `docker volume rm <project>_claude` once the
+new setup works. Answer `project` instead and that same volume stays in use, with
+nothing to copy and nothing to remove. Delete the
 `.from-old` files when you are done.
 
 ## Requirements
@@ -226,19 +235,34 @@ would differ the template handles it: `extra_hosts` gives Linux a
 `host.docker.internal`, the devcontainer CLI remaps the container user's UID to
 yours on Linux bind mounts, `JAVA_HOME` is derived rather than hardcoded per
 architecture, and the host scripts stick to what both BSD and GNU userlands have.
-Rootless Docker is the exception — its socket is not at `/var/run/docker.sock`, so
-that mount needs adjusting.
+Rootless Docker is the exception — its socket is not at `/var/run/docker.sock`.
+Install with `--docker off` and mount the real path in
+`docker-compose.override.yml`, which updates never touch.
 
 ## Notes
 
 - **The sandbox is not a security boundary against a hostile toolchain.** The
-  container has `NET_ADMIN`/`NET_RAW` and mounts the host Docker socket, which by
-  itself amounts to control of the host. The firewall limits accidental and agent
-  egress; it does not contain a determined attacker.
+  container has `NET_ADMIN`/`NET_RAW`, and the `common-utils` feature gives `dev`
+  passwordless root in it, so code running in there can flush the firewall. Read
+  the firewall as a guardrail against a mistake, a stray command or an injected
+  instruction, not as a wall that holds against a determined attacker.
+- **The host Docker socket is the loosest part of it, and it is optional.** A
+  container that reaches that socket can start a privileged one, so mounting it
+  hands over the host. `--docker on` is the default because tests that start their
+  own containers need it. Answer `off` for a project that does not, and nothing in
+  the container can reach Docker. A project that needs the socket at a different
+  path (rootless Docker) mounts it in `docker-compose.override.yml`.
 - **The host is reachable on every port.** The firewall allows whatever
   `host.docker.internal` resolves to, because your application runs there — which
   also puts other projects' databases, your IDE's built-in server and SSH within
   reach of code in the container. Bind local dev services to `127.0.0.1` if you
   would rather they were not visible.
-- Claude is launched with `--dangerously-skip-permissions`; the firewall is the
-  compensating control. Review `domains.conf` before trusting it.
+- **What the firewall allows**, beyond the hosts in `domains.conf` and
+  `.template/domains-base.conf`: the GitHub ranges, the container's
+  directly-connected subnets, the host, and DNS to the container's own resolvers.
+  There is no blanket rule for SSH, IPv6 egress is closed as a whole, and a
+  failure during setup closes the network instead of leaving it open.
+- **One login volume covers every project, unless you asked for `project`.** A
+  container that mounts `claude-shared` reads the token your other projects use.
+- Claude is launched with `--dangerously-skip-permissions`. The firewall is the
+  compensating control, so review `domains.conf` before you trust it.

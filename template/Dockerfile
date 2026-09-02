@@ -9,8 +9,11 @@
 # COPY the user-owned files that sit beside the hidden directory.
 FROM debian:13.4-slim
 
-# Core tools + the firewall toolchain (iptables/ipset/aggregate/dig/jq are all
-# used by init-firewall.sh). jq is required by the GitHub-IP-range parsing.
+# Core tools + the firewall toolchain (iptables/ipset/aggregate/dig/jq and ip from
+# iproute2 are all used by init-firewall.sh). jq is required by the
+# GitHub-IP-range parsing. iproute2 supplies the `ip route` call that finds the
+# subnets the container is attached to — until now it arrived only as a
+# side effect of a devcontainer feature, and without it the firewall setup fails.
 # tzdata carries the zoneinfo database the TZ setting below resolves against;
 # DEBIAN_FRONTEND keeps its postinst from prompting for a geographic area.
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -23,13 +26,20 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     tzdata \
     iptables \
     ipset \
+    iproute2 \
     aggregate \
     dnsutils \
     jq \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# The `dev` user (own home + sudo group membership). remoteUser in
-# devcontainer.json points here.
+# The `dev` user, with its own home. remoteUser in devcontainer.json points here.
+#
+# No sudo group: the useradd below grants none, and the sudoers entry further down
+# covers one command. What does give this user full root in the container is the
+# common-utils devcontainer feature — it reads remoteUser and writes
+# /etc/sudoers.d/dev with NOPASSWD:ALL. Run `sudo -l` in the container to see it.
+# So the runtime firewall is a guardrail against a mistake or a stray command, not
+# a boundary that holds against the agent: root in here can flush the rules.
 RUN groupadd --gid 1001 dev \
     && useradd --uid 1001 --gid dev --create-home --shell /bin/zsh dev
 

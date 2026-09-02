@@ -15,6 +15,16 @@ TEMPLATE_DIR="$SCRIPT_DIR/.template"
 # Claude). Set at install time; override at run time with TMUX_WINDOWS=N.
 WINDOWS="${TMUX_WINDOWS:-__TMUX_WINDOWS__}"
 
+# Both values below are pasted into a shell command that runs in the container
+# (see the last line of this script), so both are checked first. Without the
+# check, `TMUX_WINDOWS='1; curl … | sh'` ran that command, and a worktree name
+# that held a quote closed the quoting and did the same. The installer validates
+# the number it writes above, but not what the environment overrides it with.
+if [[ ! "$WINDOWS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ERROR: TMUX_WINDOWS must be a positive integer (got '$WINDOWS')." >&2
+    exit 1
+fi
+
 # Pin the compose project name from docker-compose.yml's top-level `name:`.
 # `devcontainer up` and `devcontainer exec` otherwise resolve the project name
 # differently for a compose file under .devcontainer/ (exec defaults to
@@ -37,6 +47,10 @@ for arg in "$@"; do
         *)           WORKTREE_NAME="$arg" ;;
     esac
 done
+if [[ -n "$WORKTREE_NAME" && ! "$WORKTREE_NAME" =~ ^[A-Za-z0-9_.][A-Za-z0-9_./-]*$ ]]; then
+    echo "ERROR: worktree name may hold letters, digits, '.', '_', '-' and '/' only (got '$WORKTREE_NAME')." >&2
+    exit 1
+fi
 
 # Install the Dev Containers CLI on demand (locally in the project).
 # Official distribution channel is npm — see https://github.com/devcontainers/cli
@@ -96,10 +110,12 @@ if [[ -x "$SCRIPT_DIR/update.sh" ]]; then
     "$SCRIPT_DIR/update.sh" --check || true
 fi
 
-# The Claude config/login volume is shared by every project installed from this
-# template (one /login covers all devcontainers). docker-compose.yml declares it
-# external, so make sure it exists — `docker volume create` is idempotent.
-docker volume create claude-shared >/dev/null
+# The Claude config/login volume, named at install time: claude-shared, which
+# every project from this template mounts, or a volume of this project's own.
+# docker-compose.yml declares it external, so make sure it exists first —
+# `docker volume create` is idempotent.
+CLAUDE_VOLUME="__CLAUDE_VOLUME__"
+docker volume create "$CLAUDE_VOLUME" >/dev/null
 
 # `devcontainer up` builds the image, starts the compose stack, applies the
 # features declared in devcontainer.json, and runs the postStartCommand

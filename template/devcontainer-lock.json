@@ -1,5 +1,5 @@
 {
-  "//": "DO NOT CHANGE THIS FILE. Template-owned, overwritten on update. It pins the devcontainer features by digest and must sit beside devcontainer.json.",
+  "//": "DO NOT CHANGE THIS FILE. Template-owned, overwritten on update. It pins the devcontainer features by digest and must sit beside devcontainer.json. The docker-outside-of-docker entry stays listed even for an install made with --docker off: nothing declares that feature then, so the entry is never read.",
   "features": {
     "ghcr.io/aivar-codeborne/devcontainer-features/claude:1.0.7": {
       "version": "1.0.7",

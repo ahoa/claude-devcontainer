@@ -20,9 +20,9 @@
   "features": {
     "ghcr.io/devcontainers/features/common-utils:2": {},
     "ghcr.io/aivar-codeborne/devcontainer-features/claude:1.0.7": {},
-    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
-      "moby": false
-    },
+    // Substituted by the installer. Present only when the install mounted the
+    // host Docker socket, because without the socket there is no daemon to reach.
+    __DOCKER_FEATURE__
     "ghcr.io/devcontainers/features/github-cli:1": {}
   },
   "overrideFeatureInstallOrder": [

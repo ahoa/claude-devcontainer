@@ -51,9 +51,32 @@ TEMPLATE_REF="main"
 PROJECT_NAME=""
 TMUX_WINDOWS=""
 TIMEZONE=""
+CLAUDE_LOGIN=""
+DOCKER_SOCKET=""
+
+# The stamp is read one key at a time and is never sourced.
+#
+# It lives in the project tree, which is bind-mounted into the container, so
+# anything that runs in there can write it. `source` ran the contents of that file
+# as shell — here, on the host, outside the container this template exists to
+# sandbox. start.sh reaches this code on every single run through --check, so one
+# line appended to .template-version was host code execution at the next start.
+# Every value is validated below, before it is used.
+stamp_value() {
+    [[ -f "$STAMP" ]] || return 0
+    # tail -1: the last assignment wins, which is what `source` did.
+    sed -n "s/^$1=//p" "$STAMP" | tail -1
+}
 if [[ -f "$STAMP" ]]; then
-    # shellcheck source=/dev/null
-    source "$STAMP"
+    TEMPLATE_SHA="$(stamp_value TEMPLATE_SHA)"
+    PROJECT_NAME="$(stamp_value PROJECT_NAME)"
+    TMUX_WINDOWS="$(stamp_value TMUX_WINDOWS)"
+    TIMEZONE="$(stamp_value TIMEZONE)"
+    CLAUDE_LOGIN="$(stamp_value CLAUDE_LOGIN)"
+    DOCKER_SOCKET="$(stamp_value DOCKER_SOCKET)"
+    # These two have a default worth keeping when the key is absent.
+    v="$(stamp_value TEMPLATE_REPO)"; [[ -n "$v" ]] && TEMPLATE_REPO="$v"
+    v="$(stamp_value TEMPLATE_REF)";  [[ -n "$v" ]] && TEMPLATE_REF="$v"
 fi
 [[ -n "$REF_OVERRIDE" ]] && TEMPLATE_REF="$REF_OVERRIDE"
 
@@ -82,6 +105,36 @@ fi
 [[ -z "$PROJECT_NAME" ]] && { echo "ERROR: cannot determine the project name — is $SCRIPT_DIR a devcontainer install?" >&2; exit 1; }
 TMUX_WINDOWS="${TMUX_WINDOWS:-1}"
 TIMEZONE="${TIMEZONE:-Europe/Tallinn}"
+# Installs from before these two questions existed all share one login volume,
+# and all mount the host Docker socket.
+CLAUDE_LOGIN="${CLAUDE_LOGIN:-shared}"
+DOCKER_SOCKET="${DOCKER_SOCKET:-on}"
+
+# ── Validate the recorded values ─────────────────────────────────────────────
+# All of them come out of files inside the project, and the container can write
+# those files. Two decide where code comes from: TEMPLATE_REPO and the SHA name
+# the install.sh that this script downloads and runs with bash. The rest become
+# its arguments. So each value must look like what it is, and anything else stops
+# the update rather than reaching a command line.
+bad_value() {
+    echo "ERROR: $STAMP holds an invalid $1: '$2'" >&2
+    echo "       Correct that file by hand, or re-install the template." >&2
+    exit 1
+}
+[[ -z "$TEMPLATE_SHA" || "$TEMPLATE_SHA" == "unknown" || "$TEMPLATE_SHA" =~ ^[0-9a-f]{7,40}$ ]] \
+    || bad_value TEMPLATE_SHA "$TEMPLATE_SHA"
+[[ "$TEMPLATE_REPO" =~ ^https://github\.com/[A-Za-z0-9_.-]{1,64}/[A-Za-z0-9_.-]{1,64}$ ]] \
+    || bad_value TEMPLATE_REPO "$TEMPLATE_REPO"
+[[ "$TEMPLATE_REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ && "$TEMPLATE_REF" != *..* ]] \
+    || bad_value TEMPLATE_REF "$TEMPLATE_REF"
+[[ "$PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || bad_value PROJECT_NAME "$PROJECT_NAME"
+[[ "$TMUX_WINDOWS" =~ ^[1-9][0-9]*$ ]]         || bad_value TMUX_WINDOWS "$TMUX_WINDOWS"
+[[ "$TIMEZONE" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*(/[A-Za-z0-9._+-]+)*$ && "$TIMEZONE" != *..* ]] \
+    || bad_value TIMEZONE "$TIMEZONE"
+[[ "$CLAUDE_LOGIN" == "shared" || "$CLAUDE_LOGIN" == "project" ]] \
+    || bad_value CLAUDE_LOGIN "$CLAUDE_LOGIN"
+[[ "$DOCKER_SOCKET" == "on" || "$DOCKER_SOCKET" == "off" ]] \
+    || bad_value DOCKER_SOCKET "$DOCKER_SOCKET"
 
 # ── Latest remote SHA ────────────────────────────────────────────────────────
 # The `sha` media type returns the bare commit SHA as plain text, so resolving a
@@ -146,6 +199,9 @@ if [[ "$CURRENT" == "$REMOTE_SHA" && $FORCE -ne 1 ]]; then
 fi
 
 echo "Updating devcontainer template: $CURRENT → $REMOTE_SHA"
+# Printed because the next step runs install.sh from this repo. The repo is
+# recorded in the project, so a reader can see when it is not the expected one.
+echo "  source: $TEMPLATE_REPO ($TEMPLATE_REF)"
 
 # ── Refuse to work on a dirty tree ───────────────────────────────────────────
 # git is the only undo for this operation, so it has to be usable.
@@ -181,6 +237,8 @@ fi
 # default then applies, which is the right fallback.
 INSTALL_ARGS=(--name "$PROJECT_NAME" --windows "$TMUX_WINDOWS" --force)
 grep -q -- '--timezone' "$TMP/install.sh" && INSTALL_ARGS+=(--timezone "$TIMEZONE")
+grep -q -- '--login' "$TMP/install.sh" && INSTALL_ARGS+=(--login "$CLAUDE_LOGIN")
+grep -q -- '--docker' "$TMP/install.sh" && INSTALL_ARGS+=(--docker "$DOCKER_SOCKET")
 
 CLAUDE_DEVCONTAINER_REPO="$TEMPLATE_REPO" \
 CLAUDE_DEVCONTAINER_REF="$REMOTE_SHA" \
@@ -199,6 +257,8 @@ TEMPLATE_REF=$TEMPLATE_REF
 PROJECT_NAME=$PROJECT_NAME
 TMUX_WINDOWS=$TMUX_WINDOWS
 TIMEZONE=$TIMEZONE
+CLAUDE_LOGIN=$CLAUDE_LOGIN
+DOCKER_SOCKET=$DOCKER_SOCKET
 EOF
 fi
 
