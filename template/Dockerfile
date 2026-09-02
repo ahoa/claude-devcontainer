@@ -107,6 +107,11 @@ ENV JAVA_HOME=/usr/lib/jvm/current
 # ── Playwright + headless Chromium ───────────────────────────────────────────
 ENV PLAYWRIGHT_VERSION=1.62.1
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+# `playwright install` deletes every browser build that its own version does not
+# use. A project on an older Playwright than PLAYWRIGHT_VERSION would thus delete
+# the build below on its first install, and the replacement then has to come
+# through the runtime firewall. This flag keeps every build in place.
+ENV PLAYWRIGHT_SKIP_BROWSER_GC=1
 RUN npx --yes "playwright@${PLAYWRIGHT_VERSION}" install --with-deps --only-shell chromium \
     && chown -R dev:dev /ms-playwright \
     && rm -rf /root/.npm \
