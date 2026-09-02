@@ -159,7 +159,15 @@ template_complete() {
 }
 
 FETCHED_DIR=""
-cleanup() { [[ -n "$FETCHED_DIR" ]] && rm -rf "$FETCHED_DIR"; return 0; }
+# The half-written file of the install loop below. Named here so that an aborted
+# run leaves no .new file behind in the project.
+PENDING_WRITE=""
+cleanup() {
+    [[ -n "$FETCHED_DIR" ]] && rm -rf "$FETCHED_DIR"
+    [[ -n "$PENDING_WRITE" ]] && rm -f "$PENDING_WRITE" "$PENDING_WRITE.bak"
+    return 0
+}
+trap cleanup EXIT
 
 fetch_template() {
     local dep
@@ -168,7 +176,6 @@ fetch_template() {
             echo "ERROR: '$dep' is required to download the template." >&2; exit 1; }
     done
 
-    trap cleanup EXIT
     FETCHED_DIR="$(mktemp -d)"
     echo "Fetching template from $REPO_URL ($REPO_REF)…" >&2
     if ! curl -fsSL "$REPO_URL/archive/$REPO_REF.tar.gz" \
@@ -643,7 +650,13 @@ for f in "${TEMPLATE_FILES[@]}"; do
         KEPT_FILES+=("$f")
         continue
     fi
-    cp "$TEMPLATE_DIR/$f" "$dest"
+    # Each file is written beside its destination and then moved onto it, never
+    # written over it. `cp` truncates the file that is already there, and that
+    # corrupts whatever reads it. update.sh runs this installer, and update.sh is
+    # one of the files the installer replaces. `mv` inside one directory is a
+    # rename: a reader keeps the file it opened, and later readers get the new one.
+    PENDING_WRITE="$dest.new"
+    cp "$TEMPLATE_DIR/$f" "$PENDING_WRITE"
     # Substitute install-time placeholders. -i.bak works on both GNU and BSD sed.
     sed -i.bak \
         -e "s|__PROJECT_NAME__|$PROJECT_NAME|g" \
@@ -652,8 +665,10 @@ for f in "${TEMPLATE_FILES[@]}"; do
         -e "s|__CLAUDE_VOLUME__|$CLAUDE_VOLUME|g" \
         -e "s|__DOCKER_SOCK_MOUNT__|$DOCKER_SOCK_MOUNT|g" \
         -e "s|__DOCKER_FEATURE__|$DOCKER_FEATURE|g" \
-        "$dest"
-    rm -f "$dest.bak"
+        "$PENDING_WRITE"
+    rm -f "$PENDING_WRITE.bak"
+    mv -f "$PENDING_WRITE" "$dest"
+    PENDING_WRITE=""
 done
 
 # Only once the hidden copies are in place, so a failure above leaves the old
