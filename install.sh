@@ -41,7 +41,7 @@ HIDDEN_FILES=(
     domains-base.conf
     tmux.conf
 )
-# Template-owned but visible, because these three are the commands you run. They
+# Template-owned but visible, because these four are the commands you run. They
 # pass --config to the devcontainer CLI, which is what lets devcontainer.json live
 # in .template/ instead of at the path the CLI would discover on its own. Also
 # always (re)written.
@@ -49,6 +49,7 @@ VISIBLE_TEMPLATE_FILES=(
     start.sh
     attach.sh
     update.sh
+    update-fw.sh
 )
 MACHINERY_FILES=("${HIDDEN_FILES[@]}" "${VISIBLE_TEMPLATE_FILES[@]}")
 # User-owned files: seeded once and never overwritten, so a re-run cannot clobber
@@ -66,7 +67,7 @@ USER_FILES=(
 # All files the template must provide (used to detect a complete template dir).
 TEMPLATE_FILES=("${MACHINERY_FILES[@]}" "${USER_FILES[@]}")
 # Files that get the executable bit, as installed paths.
-EXECUTABLE_FILES=(start.sh attach.sh update.sh .template/init-firewall.sh tools.sh)
+EXECUTABLE_FILES=(start.sh attach.sh update.sh update-fw.sh .template/init-firewall.sh tools.sh)
 # Where the hidden machinery goes, relative to .devcontainer/.
 TEMPLATE_SUBDIR=".template"
 

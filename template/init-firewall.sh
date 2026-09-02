@@ -7,8 +7,6 @@
 set -euo pipefail  # Exit on error, undefined vars, and pipeline failures
 IFS=$'\n\t'       # Stricter word splitting
 
-echo "=== Initializing container firewall ==="
-
 # --- Helper functions ---
 
 add_cidrs() {
@@ -36,7 +34,70 @@ fetch_json() {
     echo "$result"
 }
 
+# Resolve the hosts from two config files and add their addresses to the ipset:
+# the template's baseline, which updates keep current, and the project's own
+# additions, which they never touch. `-exist` makes a repeat run a no-op.
+allow_domain_ips() {
+    local CONF domain ips ip
+    for CONF in /usr/local/bin/domains-base.conf /usr/local/bin/domains.conf; do
+        [[ -f "$CONF" ]] || continue
+        # `|| [[ -n "$domain" ]]` picks up a last line with no trailing newline, which
+        # read reports as EOF and would otherwise drop silently.
+        while IFS= read -r domain || [[ -n "$domain" ]]; do
+            domain="${domain%%#*}"                  # drop comments, whole-line or trailing
+            domain=$(echo "$domain" | xargs)        # then trim what is left
+            [[ -z "$domain" ]] && continue
+            # A bare IPv4 address or CIDR goes in as it is. It names a host that
+            # has no DNS name, a Tailscale node for one, and dig would resolve nothing.
+            if [[ "$domain" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?$ ]]; then
+                ipset add allowed-domains "$domain" -exist
+                continue
+            fi
+            ips=$(dig +short "$domain" 2>/dev/null | grep -E '^[0-9]+\.' || true)
+            if [[ -z "$ips" ]]; then
+                echo "WARNING: $domain (from $(basename "$CONF")) did not resolve — not allowed"
+                continue
+            fi
+            for ip in $ips; do
+                ipset add allowed-domains "$ip" -exist
+            done
+        done < "$CONF"
+    done
+}
+
 # --- Main script ---
+
+# --refresh: resolve the host lists again and add every new address to the live
+# ipset. It flushes nothing, so the firewall stays up throughout.
+#
+# The full run resolves each host once, at container start, and the rules then
+# match those addresses only. A CDN host (the Playwright download is one) answers
+# with different edge addresses every few seconds, so a download hours later can
+# hit an address the set never saw. The sudoers entry covers this flag too, so
+# from the dev shell:
+#     sudo /usr/local/bin/init-firewall.sh --refresh
+# From the host, ./.devcontainer/update-fw.sh runs the same command.
+REFRESH=0
+case "${1:-}" in
+    --refresh) REFRESH=1 ;;
+    "")        ;;
+    *)         echo "Usage: $0 [--refresh]" >&2; exit 1 ;;
+esac
+
+if [[ $REFRESH -eq 1 ]]; then
+    if ! ipset list -t allowed-domains >/dev/null 2>&1; then
+        echo "ERROR: ipset allowed-domains does not exist — run $0 without --refresh first" >&2
+        exit 1
+    fi
+    entries() { ipset list -t allowed-domains | sed -n 's/^Number of entries: //p'; }
+    before=$(entries)
+    allow_domain_ips
+    after=$(entries)
+    echo "Firewall refresh complete: $((after - before)) new address(es) allowed"
+    exit 0
+fi
+
+echo "=== Initializing container firewall ==="
 
 # Flush our own rules and ipset. Only the filter table: every rule this script adds
 # lives there, so nat and mangle are none of its business.
@@ -93,26 +154,9 @@ fi
 
 echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | aggregate -q | add_cidrs "GitHub"
 
-# Resolve domains from two config files: the template's baseline, which updates keep
-# current, and the project's own additions, which they never touch.
-for CONF in /usr/local/bin/domains-base.conf /usr/local/bin/domains.conf; do
-    [[ -f "$CONF" ]] || continue
-    # `|| [[ -n "$domain" ]]` picks up a last line with no trailing newline, which
-    # read reports as EOF and would otherwise drop silently.
-    while IFS= read -r domain || [[ -n "$domain" ]]; do
-        domain="${domain%%#*}"                  # drop comments, whole-line or trailing
-        domain=$(echo "$domain" | xargs)        # then trim what is left
-        [[ -z "$domain" ]] && continue
-        ips=$(dig +short "$domain" 2>/dev/null | grep -E '^[0-9]+\.' || true)
-        if [[ -z "$ips" ]]; then
-            echo "WARNING: $domain (from $(basename "$CONF")) did not resolve — not allowed"
-            continue
-        fi
-        for ip in $ips; do
-            ipset add allowed-domains "$ip" -exist
-        done
-    done < "$CONF"
-done
+# Resolve the configured hosts (domains-base.conf + domains.conf). Once, at start:
+# a host whose addresses rotate later needs `--refresh`, see the top of the file.
+allow_domain_ips
 
 # Allow every subnet this container is directly attached to. That covers the path
 # to the host — where the application under development normally runs — and any

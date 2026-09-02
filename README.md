@@ -49,6 +49,7 @@ cd /path/to/your/project
 ./.devcontainer/attach.sh           # re-attach to the live session, no rebuild
 ./.devcontainer/start.sh -r         # rebuild + resume the previous Claude session
 ./.devcontainer/start.sh feature-x  # run Claude on git worktree "feature-x"
+./.devcontainer/update-fw.sh        # re-resolve the allowed hosts in the live container
 TMUX_WINDOWS=3 ./.devcontainer/start.sh   # override the window count for one run
 ```
 
@@ -73,6 +74,7 @@ creates it; if you bring the container up some other way, run
 ├── start.sh                     the commands you run
 ├── attach.sh
 ├── update.sh
+├── update-fw.sh
 │
 └── .template/                   machinery — hidden, never edit
     ├── devcontainer.json        (+ devcontainer-lock.json)
@@ -93,6 +95,16 @@ at the top and is replaced on update. Each of the four is a build input, so
 | `domains.conf` | Outbound hosts, one per line. Only what your project adds: the baseline (Anthropic, npm, Docker Hub, `fm.codeborne.com`) is in `.template/domains-base.conf`, and GitHub ranges are fetched dynamically. |
 | `firewall.sh` | `iptables`/`ipset` rules hostnames cannot express. Sourced at container start while the rules are still being built, before the catch-all reject. |
 | `docker-compose.override.yml` | Services, published ports, environment, extra volumes. Merged on top of the template's compose file. |
+
+The firewall resolves each host once, at container start, and the rules match
+those addresses only. A CDN host can answer with other addresses later, so a download can fail
+hours after the start although its host is in the list. Then refresh the set. It
+adds the new addresses and flushes nothing:
+
+```bash
+./.devcontainer/update-fw.sh                      # from the host
+sudo /usr/local/bin/init-firewall.sh --refresh    # from a shell inside the container
+```
 
 Nothing needs configuring to reach the host — it is at `host.docker.internal:PORT`,
 which the firewall allows — or to reach a sibling compose service, which resolves
