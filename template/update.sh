@@ -240,15 +240,24 @@ grep -q -- '--timezone' "$TMP/install.sh" && INSTALL_ARGS+=(--timezone "$TIMEZON
 grep -q -- '--login' "$TMP/install.sh" && INSTALL_ARGS+=(--login "$CLAUDE_LOGIN")
 grep -q -- '--docker' "$TMP/install.sh" && INSTALL_ARGS+=(--docker "$DOCKER_SOCKET")
 
-CLAUDE_DEVCONTAINER_REPO="$TEMPLATE_REPO" \
-CLAUDE_DEVCONTAINER_REF="$REMOTE_SHA" \
-CLAUDE_DEVCONTAINER_TRACK_REF="$TEMPLATE_REF" \
-    bash "$TMP/install.sh" "${INSTALL_ARGS[@]}" "$PROJECT_DIR"
+# ── Run the installer, then stop reading this file ───────────────────────────
+# The installer overwrites this file.
+# bash reads a script one command at a time, and seeks back to the byte offset
+# after each command. Once the file changes, bash reads the new file from the
+# old offset. That offset lands mid-line, and bash stops with a syntax error
+# that names a line this version never had.
+# The brace group below is one command, so bash parses all of it before the
+# installer runs. The exit at the end keeps bash from reading the file again.
+{
+  CLAUDE_DEVCONTAINER_REPO="$TEMPLATE_REPO" \
+  CLAUDE_DEVCONTAINER_REF="$REMOTE_SHA" \
+  CLAUDE_DEVCONTAINER_TRACK_REF="$TEMPLATE_REF" \
+      bash "$TMP/install.sh" "${INSTALL_ARGS[@]}" "$PROJECT_DIR"
 
-# Installers older than the stamp itself write no .template-version, which would
-# leave --check offering the same update forever. Record it here when the
-# installer did not — a no-op whenever it did.
-if ! grep -qx "TEMPLATE_SHA=$REMOTE_SHA" "$STAMP" 2>/dev/null; then
+  # Installers older than the stamp itself write no .template-version, which would
+  # leave --check offering the same update forever. Record it here when the
+  # installer did not — a no-op whenever it did.
+  if ! grep -qx "TEMPLATE_SHA=$REMOTE_SHA" "$STAMP" 2>/dev/null; then
     cat > "$STAMP" <<EOF
 # Written by update.sh — do not edit by hand. Commit this file.
 TEMPLATE_SHA=$REMOTE_SHA
@@ -260,12 +269,15 @@ TIMEZONE=$TIMEZONE
 CLAUDE_LOGIN=$CLAUDE_LOGIN
 DOCKER_SOCKET=$DOCKER_SOCKET
 EOF
-fi
+  fi
 
-cat <<EOF
+  cat <<EOF
 
 Next:
   1. Review what changed:  git -C "$PROJECT_DIR" diff -- .devcontainer
   2. Start it:             ./.devcontainer/start.sh
      start.sh sees the changed build inputs and does a clean rebuild.
 EOF
+
+  exit 0
+}
