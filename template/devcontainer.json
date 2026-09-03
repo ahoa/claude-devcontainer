@@ -14,7 +14,7 @@
     "../docker-compose.override.yml"
   ],
   "service": "devcontainer",
-  "workspaceFolder": "/workspace",
+  "workspaceFolder": "/workspace/__PROJECT_NAME__",
   "shutdownAction": "stopCompose",
   "postStartCommand": "sudo /usr/local/bin/init-firewall.sh",
   "features": {

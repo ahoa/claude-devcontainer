@@ -16,7 +16,10 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ../..:/workspace:cached
+      # Mounted under the project's own name, not at a bare /workspace. Claude
+      # keys its sessions, todos and shell snapshots by the working directory,
+      # so one shared path put every project's sessions in one bucket.
+      - ../..:/workspace/__PROJECT_NAME__:cached
       # Claude's login and config. The volume it points at is named at install
       # time: claude-shared, which every project from this template mounts, or a
       # volume of this project's own. See the volumes section at the end.

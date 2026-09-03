@@ -70,6 +70,16 @@ trust cannot reach the other projects' credentials. `start.sh` creates whichever
 volume the install chose. If you bring the container up some other way, run
 `docker volume create <that name>` once.
 
+Your project is mounted at `/workspace/<name>`, not at a bare `/workspace`. Claude
+keys its sessions, todos and shell snapshots by the working directory, so one
+shared path put every project's sessions in one bucket — `--resume` in one project
+then listed the sessions of all of them. A project installed before this change
+keeps its old sessions under `~/.claude/projects/-workspace` in the volume, where
+nothing lists them any more. This separates what `--resume` offers you, not who
+can read what: under the `shared` login every container still mounts the whole
+`claude-shared` volume, so one project's container can read another's transcripts.
+Answer `project` if that matters.
+
 ## Configuration
 
 ```

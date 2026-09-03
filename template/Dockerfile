@@ -135,4 +135,4 @@ RUN npx --yes "playwright@${PLAYWRIGHT_VERSION}" install --with-deps --only-shel
 COPY tools.sh /tmp/tools.sh
 RUN chmod +x /tmp/tools.sh && /tmp/tools.sh && rm -f /tmp/tools.sh
 
-WORKDIR /workspace
+WORKDIR /workspace/__PROJECT_NAME__
