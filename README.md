@@ -109,7 +109,7 @@ at the top and is replaced on update. Each of the four is a build input, so
 
 | File | What goes in it |
 |------|-----------------|
-| `tools.sh` | Toolchain beyond the Node, Java and Playwright the image already has — Python, database clients, … Plain shell, run as root at build time with unrestricted network. |
+| `tools.sh` | Toolchain beyond the Node, Java, Playwright and osv-scanner the image already has — Python, database clients, … Plain shell, run as root at build time with unrestricted network. |
 | `domains.conf` | Outbound hosts, one per line. Only what your project adds: the baseline (Anthropic, npm, Docker Hub, `fm.codeborne.com`) is in `.template/domains-base.conf`, and GitHub ranges are fetched dynamically. |
 | `firewall.sh` | `iptables`/`ipset` rules hostnames cannot express. Sourced at container start while the rules are still being built, before the catch-all reject. |
 | `docker-compose.override.yml` | Services, published ports, environment, extra volumes. Merged on top of the template's compose file. |
@@ -156,6 +156,7 @@ them. Fine for an experiment; fork the template for anything you want to keep.
 | `NODE_MAJOR` | `.template/Dockerfile` | Node LTS line (currently `24`) |
 | `openjdk-25-jdk-headless` | `.template/Dockerfile` | JDK package; another LTS, or `jre` for a smaller image |
 | `PLAYWRIGHT_VERSION` | `.template/Dockerfile` | Playwright release whose headless Chromium is baked in (currently `1.62.1`). Drop the whole `RUN` line to save ~680 MB in a project that never runs browser tests |
+| `OSV_SCANNER_VERSION` | `.template/Dockerfile` | osv-scanner release baked in (currently `2.5.1`). The `/review` dependency audit runs it against `gradle.lockfile` and `pom.xml`; it needs `api.osv.dev`, which `domains-base.conf` allows |
 | `ENV` block | `.template/Dockerfile` | `CLAUDE_CONFIG_DIR`, `SHELL`, `LANG`, `COLORTERM`, `DISABLE_AUTOUPDATER` |
 | `extra_hosts` | `.template/docker-compose.yml` | Makes `host.docker.internal` exist on Linux Docker Engine |
 | `domains-base.conf` | `.template/` | Baseline outbound hosts; template-owned so updates can extend it |

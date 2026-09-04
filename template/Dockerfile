@@ -127,7 +127,20 @@ RUN npx --yes "playwright@${PLAYWRIGHT_VERSION}" install --with-deps --only-shel
     && rm -rf /root/.npm \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Project toolchain — anything beyond Node, Java and Playwright. It lives in
+# ── osv-scanner ──────────────────────────────────────────────────────────────
+# The dependency audit in /review (claude-agents dep-audit) scans gradle.lockfile
+# and pom.xml with osv-scanner. It lives here, not in tools.sh, for the same
+# reason as Node and Java: every project runs the audit, and a missing binary
+# turns every review's A03 check into a LOW nobody reads. One static binary from
+# the GitHub release, no runtime. At scan time it queries api.osv.dev, which
+# domains-base.conf allows.
+ENV OSV_SCANNER_VERSION=2.5.1
+RUN curl -fsSL -o /usr/local/bin/osv-scanner \
+      "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_$(dpkg --print-architecture)" \
+    && chmod +x /usr/local/bin/osv-scanner \
+    && osv-scanner --version
+
+# Project toolchain — anything beyond Node, Java, Playwright and osv-scanner. It lives in
 # tools.sh rather than in RUN lines here, because this Dockerfile belongs to the
 # template and is overwritten on update, while tools.sh is yours and is not.
 # Kept last so editing it invalidates no earlier layer, and dropped afterwards so
