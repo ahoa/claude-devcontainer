@@ -57,8 +57,15 @@ if [[ ! -x "$DEVCONTAINER_BIN" ]]; then
     exit 1
 fi
 
-if ! "$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" --config "$TEMPLATE_DIR/devcontainer.json" true >/dev/null 2>&1; then
-    echo "ERROR: dev container is not running. Run ./start.sh to build and start it." >&2
+# Report what exec printed. A missing container is only one reason this fails.
+# An old container that still mounts the project at the path the config used
+# before an update fails here too, because exec cannot change to the workspace
+# folder. Both used to read "not running", which hid the real cause.
+if ! PROBE="$("$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" --config "$TEMPLATE_DIR/devcontainer.json" true 2>&1)"; then
+    echo "ERROR: cannot run a command in the dev container. Run ./start.sh to build and start it." >&2
+    if [[ -n "$PROBE" ]]; then
+        echo "$PROBE" >&2
+    fi
     exit 1
 fi
 
