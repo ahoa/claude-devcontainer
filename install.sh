@@ -72,6 +72,13 @@ TEMPLATE_FILES=("${MACHINERY_FILES[@]}" "${USER_FILES[@]}")
 EXECUTABLE_FILES=(start.sh attach.sh update.sh update-fw.sh .template/init-firewall.sh tools.sh)
 # Where the hidden machinery goes, relative to .devcontainer/.
 TEMPLATE_SUBDIR=".template"
+# What the devcontainer's compose project name adds to the project name. The
+# container mounts the repo at /workspace/<project name>, so a bare
+# `docker compose` in the repo takes <project name> as its own project name.
+# Without this suffix that is the devcontainer's project, and `docker compose
+# down` in the repo stops the container that runs the session. start.sh knows the
+# same suffix, to remove the container of an install from before it.
+DC_SUFFIX="-dc"
 
 usage() {
     cat <<'EOF'
@@ -372,12 +379,18 @@ resolve_template_sha() {
 # Docker daemon is unreachable — name-format validation still applies.
 list_conflicts() {
     local n="$1" found=0
+    # The devcontainer's own objects carry the suffix. A compose project named
+    # after the project alone is the repo's own stack, which is what the suffix
+    # exists to leave alone, so this reports the suffixed name only. The two
+    # patterns below keep the suffix optional, so the objects of an install from
+    # before it are still reported.
+    local dc="$n$DC_SUFFIX"
 
     docker_available || return 1
 
     # An existing compose project of the same name.
-    if docker compose ls --all 2>/dev/null | awk 'NR>1{print $1}' | grep -qx "$n"; then
-        echo "  - docker compose project '$n'"; found=1
+    if docker compose ls --all 2>/dev/null | awk 'NR>1{print $1}' | grep -qx "$dc"; then
+        echo "  - docker compose project '$dc'"; found=1
     fi
     # The Claude login/config volume is deliberately NOT checked. Under the shared
     # choice its name is fixed (claude-shared) and every project mounts it; under
@@ -386,16 +399,16 @@ list_conflicts() {
     # its own (the Claude devcontainer feature does create one, named after the
     # compose project, but it is disposable and reappears on the next `up`).
     #
-    # The image compose derives for the devcontainer service (<project>-devcontainer).
+    # The image compose derives for the devcontainer service (<compose project>-devcontainer).
     local img
     while IFS= read -r img; do
         [[ -n "$img" ]] && { echo "  - docker image '$img'"; found=1; }
-    done < <(docker images --format '{{.Repository}}' 2>/dev/null | grep -E "^${n}[-_]devcontainer$" || true)
+    done < <(docker images --format '{{.Repository}}' 2>/dev/null | grep -E "^${n}($DC_SUFFIX)?[-_]devcontainer$" || true)
     # Leftover containers using the project prefix.
     local c
     while IFS= read -r c; do
         [[ -n "$c" ]] && { echo "  - docker container '$c'"; found=1; }
-    done < <(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E "^${n}[-_]devcontainer" || true)
+    done < <(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E "^${n}($DC_SUFFIX)?[-_]devcontainer" || true)
 
     [[ $found -eq 1 ]]
 }
@@ -481,6 +494,90 @@ migrate_claude_volume() {
     fi
 }
 
+# Link the sessions of a pre-per-project install into this project's bucket.
+# Claude names the directory that holds its sessions after the working directory,
+# so the move from /workspace to /workspace/<name> left every session written
+# before it in a bucket nothing lists any more. This links them into the new
+# bucket, once per volume and project. The old bucket also holds the sessions of
+# the other projects that shared /workspace, and those come too — one bucket is
+# what each project already listed, so nothing gets worse.
+#
+# The transcripts are hardlinked, not copied. Both buckets sit in one volume, so
+# the 350 MB a grown bucket holds costs nothing a second time. The memory/
+# directory is copied instead: two projects that share one inode would read each
+# other's edits.
+migrate_claude_sessions() {
+    docker_available || return 0
+    docker volume ls --format '{{.Name}}' 2>/dev/null | grep -qx "$CLAUDE_VOLUME" || return 0
+
+    # Claude replaces every character that is not a letter or a digit with '-', so
+    # a project name that holds '_' has two candidate bucket names. The helper below
+    # takes the sanitized name and prefers a bucket that already exists.
+    local bucket script out status
+    bucket="$(printf %s "/workspace/$PROJECT_NAME" | sed 's/[^a-zA-Z0-9]/-/g')"
+
+    # The heredoc body has to sit inside the command substitution, so the script
+    # goes into a variable here and reaches the helper container over its stdin.
+    script="$(cat <<'MIGRATE'
+set -eu
+bucket="$1"
+if [ "$2" != "$1" ] && [ -d "/v/projects/$2" ] && [ ! -d "/v/projects/$1" ]; then
+  bucket="$2"
+fi
+old=/v/projects/-workspace
+new="/v/projects/$bucket"
+marker="/v/projects/.migrated-to-$bucket"
+
+if [ ! -d "$old" ]; then exit 3; fi
+if [ -e "$marker" ]; then exit 4; fi
+
+owner="$(stat -c '%u:%g' "$old")"
+mode="$(stat -c '%a' "$old")"
+mkdir -p "$new"
+chown "$owner" "$new"
+chmod "$mode" "$new"
+
+linked=0
+for entry in "$old"/*; do
+  if [ ! -e "$entry" ]; then continue; fi
+  name="${entry##*/}"
+  if [ "$name" = memory ]; then continue; fi
+  if [ -e "$new/$name" ]; then continue; fi
+  if [ -d "$entry" ]; then
+    cp -al "$entry" "$new/$name" 2>/dev/null || cp -a "$entry" "$new/$name"
+  else
+    ln "$entry" "$new/$name" 2>/dev/null || cp -a "$entry" "$new/$name"
+  fi
+  linked=$((linked + 1))
+done
+
+# Copied, never linked — see the comment on the calling function.
+if [ -d "$old/memory" ] && [ -z "$(ls -A "$new/memory" 2>/dev/null)" ]; then
+  mkdir -p "$new/memory"
+  chown "$owner" "$new/memory"
+  cp -a "$old"/memory/. "$new"/memory/
+fi
+
+: > "$marker"
+chown "$owner" "$marker"
+echo "$linked $bucket"
+MIGRATE
+)"
+
+    set +e
+    out="$(printf '%s\n' "$script" \
+        | docker run --rm -i -v "$CLAUDE_VOLUME":/v alpine sh -s -- \
+              "$bucket" "-workspace-$PROJECT_NAME" 2>&1)"
+    status=$?
+    set -e
+
+    case $status in
+        0) echo "→ Linked ${out%% *} old Claude session entries from the /workspace bucket into ${out##* }" ;;
+        3|4) : ;;  # nothing there to migrate, or an earlier run did it
+        *) echo "WARNING: could not link the old Claude sessions into $bucket — ${out:-no output}" >&2 ;;
+    esac
+}
+
 # ── Resolve the project name (validate + conflict-check, re-prompt as needed) ─
 EXISTING_NAME=""
 EXISTING_WINDOWS=""
@@ -537,6 +634,10 @@ while :; do
     echo "Choose a different name." >&2
     PROJECT_NAME=""
 done
+
+# The name compose gives the devcontainer's project, and with it the container
+# name (<compose project>-devcontainer-1) and the image name. See DC_SUFFIX above.
+COMPOSE_PROJECT="${PROJECT_NAME}${DC_SUFFIX}"
 
 # ── Number of tmux windows ────────────────────────────────────────────────────
 if [[ -z "$TMUX_WINDOWS" ]]; then
@@ -660,6 +761,7 @@ for f in "${TEMPLATE_FILES[@]}"; do
     # Substitute install-time placeholders. -i.bak works on both GNU and BSD sed.
     sed -i.bak \
         -e "s|__PROJECT_NAME__|$PROJECT_NAME|g" \
+        -e "s|__COMPOSE_PROJECT__|$COMPOSE_PROJECT|g" \
         -e "s|__TMUX_WINDOWS__|$TMUX_WINDOWS|g" \
         -e "s|__TIMEZONE__|$TIMEZONE|g" \
         -e "s|__CLAUDE_VOLUME__|$CLAUDE_VOLUME|g" \
@@ -709,10 +811,15 @@ if [[ "$CLAUDE_LOGIN" == "shared" ]]; then
     migrate_claude_volume
 fi
 
+# Reach the sessions that a pre-per-project install left behind. Runs after the
+# login migration above, so it sees whatever that one moved in.
+migrate_claude_sessions
+
 cat <<EOF
 
 ✓ Installed Claude devcontainer into $DEST
     project name : $PROJECT_NAME
+    compose proj : $COMPOSE_PROJECT (container $COMPOSE_PROJECT-devcontainer-1)
     tmux windows : $TMUX_WINDOWS
     timezone     : $TIMEZONE
     claude login : $CLAUDE_LOGIN (volume $CLAUDE_VOLUME)

@@ -95,6 +95,10 @@ find_machinery() {
 
 if [[ -z "$PROJECT_NAME" ]]; then
     PROJECT_NAME="$(awk -F': *' '/^name:/{print $2; exit}' "$(find_machinery docker-compose.yml)" 2>/dev/null || true)"
+    # That line holds the compose project name, which is the project name plus the
+    # '-dc' suffix in every install that has the suffix. The installer adds the
+    # suffix again, so take it off here.
+    PROJECT_NAME="${PROJECT_NAME%-dc}"
 fi
 if [[ -z "$TMUX_WINDOWS" ]]; then
     TMUX_WINDOWS="$(sed -n 's/^WINDOWS="\${TMUX_WINDOWS:-\([0-9]*\)}".*/\1/p' "$SCRIPT_DIR/start.sh" 2>/dev/null | head -1)"

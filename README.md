@@ -71,14 +71,34 @@ volume the install chose. If you bring the container up some other way, run
 `docker volume create <that name>` once.
 
 Your project is mounted at `/workspace/<name>`, not at a bare `/workspace`. Claude
-keys its sessions, todos and shell snapshots by the working directory, so one
-shared path put every project's sessions in one bucket — `--resume` in one project
-then listed the sessions of all of them. A project installed before this change
-keeps its old sessions under `~/.claude/projects/-workspace` in the volume, where
-nothing lists them any more. This separates what `--resume` offers you, not who
-can read what: under the `shared` login every container still mounts the whole
-`claude-shared` volume, so one project's container can read another's transcripts.
-Answer `project` if that matters.
+names the directory that holds its session transcripts after the working
+directory. One shared path therefore put every project's sessions in one bucket,
+and `--resume` in one project listed the sessions of all of them. This separates
+what `--resume` offers you, not who can read what. Under the `shared` login every
+container still mounts the whole `claude-shared` volume, so one project's
+container can read another's transcripts. Answer `project` if that matters.
+
+A project installed before this change keeps its old sessions under
+`~/.claude/projects/-workspace` in the volume. On the first install or update
+after this change, the installer hardlinks them into the project's new bucket, so
+`--resume` finds them again. Both buckets sit in one volume, so the links cost no
+disk space, and the old bucket stays where it is. That bucket holds the sessions
+of every project that shared `/workspace`, so each project's history shows all of
+them once. Sessions written after the update stay separate. The installer copies
+auto-memory files instead of linking them, because two projects that share one
+file read each other's edits.
+
+The devcontainer's own compose project is `<name>-dc`, not `<name>`. Inside the
+container the repo sits at `/workspace/<name>`, and a bare `docker compose` there
+takes `<name>` as its project name. Without the suffix that name is the
+devcontainer's project, and `docker compose down` in the repo stops the container
+that runs the session. The devcontainer therefore answers to
+`<name>-dc-devcontainer-1`.
+
+A project installed before the suffix still has its devcontainer under the old
+name. `start.sh` removes that container on the next run and builds the new one,
+so the live tmux session goes with it once. The old image stays behind. Remove it
+with `docker image rm <name>-devcontainer`.
 
 ## Configuration
 

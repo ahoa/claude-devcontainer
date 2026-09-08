@@ -4,7 +4,12 @@
 # environment and volumes go in docker-compose.override.yml one level up, which
 # devcontainer.json merges on top of this file.
 # ─────────────────────────────────────────────────────────────────────────────
-name: __PROJECT_NAME__
+# The project name plus a suffix, and not the project name itself. The repo is
+# mounted at /workspace/<project name> below, and a bare `docker compose` in the
+# repo takes its project name from that directory. Without the suffix that command
+# finds this project, and `docker compose down` in the repo stops the container it
+# runs in. The installer substitutes the whole name.
+name: __COMPOSE_PROJECT__
 services:
   devcontainer:
     build:

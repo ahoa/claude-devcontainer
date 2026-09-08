@@ -110,6 +110,28 @@ if [[ -x "$SCRIPT_DIR/update.sh" ]]; then
     "$SCRIPT_DIR/update.sh" --check || true
 fi
 
+# One-time cleanup for an install from before the compose project name gained its
+# suffix (see docker-compose.yml). Such an install has its devcontainer under the
+# project name alone, and the `up` below would leave that container running beside
+# the new one. The two filters match this project's devcontainer and nothing else:
+# the devcontainer CLI labels the container with the folder it was created from,
+# and a stack of the repo's own never carries that label.
+LEGACY_COMPOSE_PROJECT="__PROJECT_NAME__"
+if [[ "$LEGACY_COMPOSE_PROJECT" != "$COMPOSE_PROJECT_NAME" ]]; then
+    STALE=()
+    while IFS= read -r id; do
+        [[ -n "$id" ]] && STALE+=("$id")
+    done < <(docker ps -aq \
+        --filter "label=devcontainer.local_folder=$PROJECT_DIR" \
+        --filter "label=com.docker.compose.project=$LEGACY_COMPOSE_PROJECT" 2>/dev/null || true)
+    if [[ ${#STALE[@]} -gt 0 ]]; then
+        echo "==> The compose project is '$COMPOSE_PROJECT_NAME' now — removing the container of the old project '$LEGACY_COMPOSE_PROJECT'"
+        echo "    Its image stays behind. Remove it with: docker image rm $LEGACY_COMPOSE_PROJECT-devcontainer"
+        docker rm -f "${STALE[@]}" >/dev/null \
+            || echo "WARNING: could not remove the old container. Remove it by hand, or two containers mount this project." >&2
+    fi
+fi
+
 # The Claude config/login volume, named at install time: claude-shared, which
 # every project from this template mounts, or a volume of this project's own.
 # docker-compose.yml declares it external, so make sure it exists first —
