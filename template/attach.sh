@@ -69,6 +69,11 @@ if ! PROBE="$("$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" --confi
     exit 1
 fi
 
+# The ca plugin: the flag comes from the host, where the plugin is installed.
+# tmux starts Claude through a non-interactive zsh, which does not read
+# ~/.zshrc, so the claude() function there never reaches this session.
+CA_FLAG="$(bash "$TEMPLATE_DIR/ca-plugin-flag.sh")"
+
 # Re-attach to (or create) the tmux session running Claude. If the session is
 # already live this attaches to it as-is — so it picks up exactly where a
 # previous, disconnected session left off, including from a different machine.
@@ -76,10 +81,10 @@ fi
 # `--continue` only makes sense for one instance, so windows 2..N start fresh.
 if [[ -n "$WORKTREE_NAME" ]]; then
     SESSION="claude-$WORKTREE_NAME"
-    CLAUDE_BASE_CMD="claude --dangerously-skip-permissions --worktree $WORKTREE_NAME"
+    CLAUDE_BASE_CMD="claude --dangerously-skip-permissions$CA_FLAG --worktree $WORKTREE_NAME"
 else
     SESSION="claude"
-    CLAUDE_BASE_CMD="claude --dangerously-skip-permissions"
+    CLAUDE_BASE_CMD="claude --dangerously-skip-permissions$CA_FLAG"
 fi
 CLAUDE_CMD="$CLAUDE_BASE_CMD$RESUME"
 

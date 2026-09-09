@@ -17,6 +17,13 @@
   "workspaceFolder": "/workspace/__PROJECT_NAME__",
   "shutdownAction": "stopCompose",
   "postStartCommand": "sudo /usr/local/bin/init-firewall.sh",
+  // Runs on the HOST, before the mount. A missing source makes a bind mount
+  // fail, and the container does not start.
+  "initializeCommand": "mkdir -p ${localEnv:HOME}/.claude/plugins/cache/codeborne/claude-agents",
+  // The claude feature writes its own claude() into ~/.zshrc after the image
+  // build, so the Dockerfile cannot override it. Append ours after it, once per
+  // container creation.
+  "postCreateCommand": "grep -q CA_PLUGIN_CACHE ~/.zshrc || cat .devcontainer/.template/ca-claude.zsh >> ~/.zshrc",
   "features": {
     "ghcr.io/devcontainers/features/common-utils:2": {},
     "ghcr.io/aivar-codeborne/devcontainer-features/claude:1.0.7": {},

@@ -42,6 +42,8 @@ HIDDEN_FILES=(
     init-firewall.sh
     domains-base.conf
     tmux.conf
+    ca-plugin-flag.sh
+    ca-claude.zsh
 )
 # Template-owned but visible, because these four are the commands you run. They
 # pass --config to the devcontainer CLI, which is what lets devcontainer.json live

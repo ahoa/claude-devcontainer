@@ -20,6 +20,10 @@ services:
       - NET_RAW
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    environment:
+      # Where the claude() function in ~/.zshrc looks for the newest plugin
+      # version. Same path as the mount below.
+      CA_PLUGIN_CACHE: ${HOME}/.claude/plugins/cache/codeborne/claude-agents
     volumes:
       # Mounted under the project's own name, not at a bare /workspace. Claude
       # keys its sessions, todos and shell snapshots by the working directory,
@@ -29,6 +33,13 @@ services:
       # time: claude-shared, which every project from this template mounts, or a
       # volume of this project's own. See the volumes section at the end.
       - claude:/home/dev/.claude
+      # The ca plugin, read-only from the host, which owns the version. Mounted
+      # at the SAME absolute path as on the host: the synced rules carry the
+      # plugin's absolute path and the sync stamp includes it, so a different
+      # path makes host and container re-sync the rules in turn. Compose
+      # substitutes ${HOME} from the host environment. It is empty on a Windows
+      # host, and the scripts then report a missing plugin.
+      - ${HOME}/.claude/plugins/cache/codeborne/claude-agents:${HOME}/.claude/plugins/cache/codeborne/claude-agents:ro
       # The host Docker daemon socket, mounted only when the install asked for it
       # (--docker on, which is the default). It lets this container drive the host
       # daemon, and that by itself amounts to control of the host — see the

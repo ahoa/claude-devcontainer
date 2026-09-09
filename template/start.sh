@@ -148,6 +148,11 @@ docker volume create "$CLAUDE_VOLUME" >/dev/null
 # Only reached on a successful `up` (set -e aborts earlier on failure).
 echo "$BUILD_HASH" > "$HASH_FILE"
 
+# The ca plugin: the flag comes from the host, where the plugin is installed.
+# tmux starts Claude through a non-interactive zsh, which does not read
+# ~/.zshrc, so the claude() function there never reaches this session.
+CA_FLAG="$(bash "$TEMPLATE_DIR/ca-plugin-flag.sh")"
+
 # Attach to the running dev container as the configured remoteUser (`dev`) and
 # launch Claude inside a tmux session. The session is created on the first run
 # and re-attached on later runs, so start.sh and attach.sh share one live
@@ -156,10 +161,10 @@ echo "$BUILD_HASH" > "$HASH_FILE"
 # one instance, so windows 2..N start fresh.
 if [[ -n "$WORKTREE_NAME" ]]; then
     SESSION="claude-$WORKTREE_NAME"
-    CLAUDE_BASE_CMD="claude --dangerously-skip-permissions --worktree $WORKTREE_NAME"
+    CLAUDE_BASE_CMD="claude --dangerously-skip-permissions$CA_FLAG --worktree $WORKTREE_NAME"
 else
     SESSION="claude"
-    CLAUDE_BASE_CMD="claude --dangerously-skip-permissions"
+    CLAUDE_BASE_CMD="claude --dangerously-skip-permissions$CA_FLAG"
 fi
 CLAUDE_CMD="$CLAUDE_BASE_CMD$RESUME"
 
