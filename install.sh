@@ -41,6 +41,7 @@ HIDDEN_FILES=(
     docker-compose.yml
     init-firewall.sh
     domains-base.conf
+    fw-watch.sh
     tmux.conf
     ca-plugin-flag.sh
     ca-claude.zsh
@@ -71,7 +72,7 @@ USER_FILES=(
 # All files the template must provide (used to detect a complete template dir).
 TEMPLATE_FILES=("${MACHINERY_FILES[@]}" "${USER_FILES[@]}")
 # Files that get the executable bit, as installed paths.
-EXECUTABLE_FILES=(start.sh attach.sh update.sh update-fw.sh .template/init-firewall.sh tools.sh)
+EXECUTABLE_FILES=(start.sh attach.sh update.sh update-fw.sh .template/init-firewall.sh .template/fw-watch.sh tools.sh)
 # Where the hidden machinery goes, relative to .devcontainer/.
 TEMPLATE_SUBDIR=".template"
 # What the devcontainer's compose project name adds to the project name. The

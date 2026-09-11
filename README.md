@@ -53,7 +53,7 @@ cd /path/to/your/project
 ./.devcontainer/attach.sh           # re-attach to the live session, no rebuild
 ./.devcontainer/start.sh -r         # rebuild + resume the previous Claude session
 ./.devcontainer/start.sh feature-x  # run Claude on git worktree "feature-x"
-./.devcontainer/update-fw.sh        # re-resolve the allowed hosts in the live container
+./.devcontainer/update-fw.sh        # apply domains.conf + current addresses to the live container
 TMUX_WINDOWS=3 ./.devcontainer/start.sh   # override the window count for one run
 ```
 
@@ -119,6 +119,7 @@ with `docker image rm <name>-devcontainer`.
     ├── Dockerfile
     ├── docker-compose.yml
     ├── init-firewall.sh         (+ domains-base.conf)
+    ├── fw-watch.sh
     └── tmux.conf
 ```
 
@@ -136,13 +137,27 @@ at the top and is replaced on update. Each of the four is a build input, so
 
 The firewall resolves each host once, at container start, and the rules match
 those addresses only. A CDN host can answer with other addresses later, so a download can fail
-hours after the start although its host is in the list. Then refresh the set. It
-adds the new addresses and flushes nothing:
+hours after the start although its host is in the list. `domains.conf` is baked
+into the image too, so an edit to it would normally need a rebuild.
+
+The container therefore keeps both current by itself: `.template/fw-watch.sh`
+starts with the container and, every five minutes, copies an edited `domains.conf`
+in and re-resolves every host. It only adds addresses and flushes nothing, so a
+tick cannot take the network down. It stays quiet unless something changed —
+`tail -f /tmp/fw-watch.log` inside the container shows what it did. Set
+`FW_WATCH_INTERVAL` (seconds) in `docker-compose.override.yml` to change the pace.
+
+To apply an edit at once instead of waiting for the next tick:
 
 ```bash
-./.devcontainer/update-fw.sh                      # from the host
-sudo /usr/local/bin/init-firewall.sh --refresh    # from a shell inside the container
+./.devcontainer/update-fw.sh                       # from the host
+.devcontainer/.template/fw-watch.sh --once         # from a shell inside the container
 ```
+
+A host **removed** from `domains.conf` is the one change this cannot apply: a
+refresh never takes an address out of the live set. Removals take effect on the
+next `./start.sh`, which rebuilds the image and builds the rules from scratch.
+The tick says so in the log when it sees one.
 
 Nothing needs configuring to reach the host — it is at `host.docker.internal:PORT`,
 which the firewall allows — or to reach a sibling compose service, which resolves

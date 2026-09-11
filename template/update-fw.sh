@@ -4,14 +4,20 @@
 # overwritten whenever the template is updated. It stays visible because you run
 # it; the machinery it drives is in .template/.
 #
-# update-fw.sh — resolve the allowed hosts again, inside the running container.
+# update-fw.sh — apply the current host list to the running container, now.
 #
 # The firewall resolves each host once, at container start, and its rules match
 # those addresses only. A CDN host answers with other addresses later, so a
 # download can fail hours after the start although its host is in domains.conf.
-# This adds the current addresses to the live set and flushes nothing. It is the
-# host-side form of this command from a shell inside the container:
-#     sudo /usr/local/bin/init-firewall.sh --refresh
+# An edited domains.conf does not reach the container at all, because the image
+# was built with a copy of it.
+#
+# This fixes both: it copies an edited list in and adds the current addresses to
+# the live set, flushing nothing. The container already does this by itself every
+# few minutes — see .template/fw-watch.sh, which devcontainer.json starts — so
+# this is that same tick, on demand, when you would rather not wait for it. The
+# form from a shell inside the container:
+#     .devcontainer/.template/fw-watch.sh --once
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -41,4 +47,4 @@ if ! PROBE="$("${EXEC[@]}" true 2>&1)"; then
   exit 1
 fi
 
-exec "${EXEC[@]}" sudo /usr/local/bin/init-firewall.sh --refresh
+exec "${EXEC[@]}" .devcontainer/.template/fw-watch.sh --once
