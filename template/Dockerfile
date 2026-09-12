@@ -115,7 +115,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 ENV JAVA_HOME=/usr/lib/jvm/current
 
 # ── Playwright + headless Chromium ───────────────────────────────────────────
-ENV PLAYWRIGHT_VERSION=1.62.1
+ENV PLAYWRIGHT_VERSION=1.63.0
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 # `playwright install` deletes every browser build that its own version does not
 # use. A project on an older Playwright than PLAYWRIGHT_VERSION would thus delete
