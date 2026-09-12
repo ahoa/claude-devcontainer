@@ -50,8 +50,9 @@ if [[ -n "$WORKTREE_NAME" && ! "$WORKTREE_NAME" =~ ^[A-Za-z0-9_.][A-Za-z0-9_./-]
 fi
 
 # Fast path — assumes start.sh has already brought the container up and
-# installed the devcontainer CLI locally. Errors out cleanly if either is missing.
-DEVCONTAINER_BIN="$PROJECT_DIR/node_modules/.bin/devcontainer"
+# installed the devcontainer CLI under .template/. Errors out cleanly if either is
+# missing.
+DEVCONTAINER_BIN="$TEMPLATE_DIR/node_modules/.bin/devcontainer"
 if [[ ! -x "$DEVCONTAINER_BIN" ]]; then
     echo "ERROR: devcontainer CLI not found at $DEVCONTAINER_BIN. Run ./start.sh first." >&2
     exit 1

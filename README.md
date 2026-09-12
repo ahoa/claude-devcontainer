@@ -274,7 +274,12 @@ nothing to copy and nothing to remove. Delete the
 - Docker with Compose v2 — Docker Desktop, OrbStack or Docker Engine
 - `bash`, `curl`, and `tar` when installing without a checkout
 - Node.js / `npm` on the host: `start.sh` installs the `@devcontainers/cli`
-  locally into the project on first run
+  (1.8 MB) into `.devcontainer/.template/` on first run. Never into the project's
+  own `node_modules` — that made the project's package manager our business, and
+  a pnpm workspace, whose `workspace:`/`catalog:` dependencies npm refuses to
+  parse, could not be started at all. A project needs no Node of its own. A
+  project started before this keeps an unused copy in its own `node_modules`;
+  the next `npm ci` or `pnpm install` clears it.
 
 The same install works from macOS and Linux, on x86-64 and arm64. Where the two
 would differ the template handles it: `extra_hosts` gives Linux a

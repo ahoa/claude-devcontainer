@@ -784,10 +784,14 @@ for f in "${EXECUTABLE_FILES[@]}"; do
     chmod +x "$DEST/$f"
 done
 
-# Keep runtime markers out of git: the build-input hash and the update-check cache.
-if [[ ! -f "$DEST/.gitignore" ]]; then
-    printf '.build-hash\n.update-check\n' > "$DEST/.gitignore"
-fi
+# Keep runtime artifacts out of git: the build-input hash, the update-check cache
+# and the devcontainer CLI start.sh installs under .template/. Entry by entry, so
+# an install that predates one of them gains it — the file as a whole is left
+# alone, in case the project added lines of its own.
+touch "$DEST/.gitignore"
+for ignore in .build-hash .update-check node_modules/; do
+    grep -qxF "$ignore" "$DEST/.gitignore" || echo "$ignore" >> "$DEST/.gitignore"
+done
 
 # Record which template version this install came from, plus the answers needed to
 # re-render it. update.sh reads this to know what to compare against and how to

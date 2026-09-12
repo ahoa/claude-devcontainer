@@ -52,18 +52,32 @@ if [[ -n "$WORKTREE_NAME" && ! "$WORKTREE_NAME" =~ ^[A-Za-z0-9_.][A-Za-z0-9_./-]
     exit 1
 fi
 
-# Install the Dev Containers CLI on demand (locally in the project).
-# Official distribution channel is npm — see https://github.com/devcontainers/cli
-DEVCONTAINER_BIN="$PROJECT_DIR/node_modules/.bin/devcontainer"
+# Install the Dev Containers CLI on demand, into .template/ and not into the
+# project's own node_modules. Official distribution channel is npm — see
+# https://github.com/devcontainers/cli
+#
+# It used to go in the project root, which made the project's package manager our
+# business. npm reads the package.json it finds there, and a pnpm workspace states
+# its dependencies as `workspace:*` or `catalog:` — protocols npm refuses with
+# EUNSUPPORTEDPROTOCOL, so this line failed and the container could not be started
+# at all. Short of that it still reconciled the tree it found, rewriting what pnpm
+# or yarn had laid out, and in a project with no Node in it at all it left a
+# node_modules behind.
+#
+# Here none of that applies: this directory has no package.json, so npm installs
+# 1.8 MB of CLI and reads nothing of the project's. The explicit `--prefix .`
+# is what keeps it here — without it npm walks up to the nearest package.json and
+# installs there, which is the original bug with extra steps.
+DEVCONTAINER_BIN="$TEMPLATE_DIR/node_modules/.bin/devcontainer"
 if [[ ! -x "$DEVCONTAINER_BIN" ]]; then
-    echo "devcontainer CLI not found — installing @devcontainers/cli locally via npm..."
+    echo "devcontainer CLI not found — installing @devcontainers/cli under .devcontainer/.template/..."
     if ! command -v npm >/dev/null 2>&1; then
         echo "ERROR: npm is required to install @devcontainers/cli but was not found on PATH." >&2
         echo "Install Node.js (https://nodejs.org) and re-run this script." >&2
         exit 1
     fi
-    # --no-save: dev-only tool; installing it here must not rewrite package.json.
-    (cd "$PROJECT_DIR" && npm install --no-save @devcontainers/cli)
+    # --no-save: dev-only tool, and there is no package.json here to write to.
+    (cd "$TEMPLATE_DIR" && npm install --no-save --prefix . @devcontainers/cli)
 fi
 
 # Force a rebuild when the image inputs change. `devcontainer up` REUSES an

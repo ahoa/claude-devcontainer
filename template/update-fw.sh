@@ -29,7 +29,7 @@ TEMPLATE_DIR="$SCRIPT_DIR/.template"
 COMPOSE_PROJECT_NAME="$(awk -F': *' '/^name:/{print $2; exit}' "$TEMPLATE_DIR/docker-compose.yml")"
 export COMPOSE_PROJECT_NAME
 
-DEVCONTAINER_BIN="$PROJECT_DIR/node_modules/.bin/devcontainer"
+DEVCONTAINER_BIN="$TEMPLATE_DIR/node_modules/.bin/devcontainer"
 if [[ ! -x "$DEVCONTAINER_BIN" ]]; then
   echo "ERROR: devcontainer CLI not found at $DEVCONTAINER_BIN. Run ./start.sh first." >&2
   exit 1
