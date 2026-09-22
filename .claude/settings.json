@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(*/.claude/hooks/lib/phase-metrics.sh*)",
+      "Bash(*/.claude/hooks/lib/phase-tokens.sh*)",
+      "Bash(*/.claude/hooks/lib/develop-marker.sh*)",
+      "Bash(*/.claude/hooks/lib/ambient-ledger.sh*)",
+      "Bash(*/.claude/hooks/lib/xreview-modules.sh*)",
+      "Bash(*/.claude/hooks/lib/local-phase.sh*)",
+      "Bash(rg:*)",
+      "Bash(ls:*)",
+      "Bash(wc:*)",
+      "Bash(python3 */skills/ste-writing/ste-lint.py*)",
+      "Bash(date:*)",
+      "Bash(printf:*)",
+      "Bash(cksum)",
+      "Bash(cksum:*)",
+      "Bash(cut:*)",
+      "Bash(hostname:*)",
+      "Bash(ip route:*)",
+      "mcp__stories__list_stories",
+      "mcp__stories__read_story",
+      "mcp__stories__create_story",
+      "mcp__stories__update_story",
+      "mcp__stories__change_status",
+      "mcp__stories__log_learning",
+      "mcp__stories__list_learnings",
+      "mcp__stories__promote_learning",
+      "mcp__stories__log_metric",
+      "mcp__stories__get_metrics_trend",
+      "mcp__stories__get_story_metrics"
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "sh -c 'p=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}/.claude/statusline.sh\"; [ -x \"$p\" ] || p=\"$HOME/.claude/statusline/claude-agents-statusline.sh\"; exec \"$p\"' 2>/dev/null",
+    "padding": 0,
+    "refreshInterval": 60
+  }
+}
