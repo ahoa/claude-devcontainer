@@ -45,14 +45,16 @@ HIDDEN_FILES=(
     tmux.conf
     ca-plugin-flag.sh
     ca-claude.zsh
+    build-hash.sh
 )
-# Template-owned but visible, because these four are the commands you run. They
-# pass --config to the devcontainer CLI, which is what lets devcontainer.json live
-# in .template/ instead of at the path the CLI would discover on its own. Also
-# always (re)written.
+# Template-owned but visible, because these are the commands you run. They pass
+# --config to the devcontainer CLI, which is what lets devcontainer.json live in
+# .template/ instead of at the path the CLI would discover on its own. Also always
+# (re)written.
 VISIBLE_TEMPLATE_FILES=(
     start.sh
     attach.sh
+    loop.sh
     update.sh
     update-fw.sh
 )
@@ -72,7 +74,7 @@ USER_FILES=(
 # All files the template must provide (used to detect a complete template dir).
 TEMPLATE_FILES=("${MACHINERY_FILES[@]}" "${USER_FILES[@]}")
 # Files that get the executable bit, as installed paths.
-EXECUTABLE_FILES=(start.sh attach.sh update.sh update-fw.sh .template/init-firewall.sh .template/fw-watch.sh tools.sh)
+EXECUTABLE_FILES=(start.sh attach.sh loop.sh update.sh update-fw.sh .template/init-firewall.sh .template/fw-watch.sh .template/build-hash.sh tools.sh)
 # Where the hidden machinery goes, relative to .devcontainer/.
 TEMPLATE_SUBDIR=".template"
 # What the devcontainer's compose project name adds to the project name. The

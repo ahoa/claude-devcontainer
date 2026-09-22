@@ -40,6 +40,20 @@
 # If some config insists on localhost:5432, give the service the devcontainer's
 # network namespace with `network_mode: "service:devcontainer"` instead of
 # forwarding ports. It then listens on the devcontainer's own loopback.
+#
+# Secrets for the unattended loop (loop.sh) go in a file, not in a line here, so
+# they stay out of git:
+#
+#   services:
+#     devcontainer:
+#       env_file: ../.env.loop   # GH_TOKEN=... — fine-grained PAT, only this repo, contents:write
+#
+# Put `.env.loop` in the PROJECT's .gitignore — this file is committed, that one
+# must not be. The path is relative to .template/, which is why it starts with
+# `../` (see the GOTCHA above). Everything in it reaches `devcontainer exec` and
+# so the loop's tmux session, which is how the loop gets a token to push with.
+# The container has no SSH key, so that token is the only way a push works — see
+# the README's Loop section.
 
 services:
   devcontainer: {}

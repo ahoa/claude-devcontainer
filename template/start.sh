@@ -85,26 +85,11 @@ fi
 # build input) and will happily re-attach to a stale image. So we hash the build
 # inputs ourselves and pass `--remove-existing-container` whenever they differ
 # from the last successful run (or on first run, when no marker exists).
-BUILD_INPUTS=(
-    "$TEMPLATE_DIR/Dockerfile"
-    "$TEMPLATE_DIR/docker-compose.yml"
-    "$TEMPLATE_DIR/tmux.conf"
-    "$TEMPLATE_DIR/init-firewall.sh"
-    "$TEMPLATE_DIR/domains-base.conf"
-    "$TEMPLATE_DIR/devcontainer.json"
-    "$SCRIPT_DIR/tools.sh"
-    "$SCRIPT_DIR/domains.conf"
-    "$SCRIPT_DIR/firewall.sh"
-    "$SCRIPT_DIR/docker-compose.override.yml"
-)
-# sha256sum is GNU coreutils; macOS only started shipping it recently, and shasum is
-# what is always there. Either way the hash only has to be stable, not standard.
-if command -v sha256sum >/dev/null 2>&1; then
-    SHA_CMD=(sha256sum)
-else
-    SHA_CMD=(shasum -a 256)
-fi
-BUILD_HASH="$(cat "${BUILD_INPUTS[@]}" 2>/dev/null | "${SHA_CMD[@]}" | cut -d' ' -f1)"
+#
+# The list of inputs and the hashing both live in .template/build-hash.sh, because
+# loop.sh asks the same question and has to get the same answer: it refuses to run
+# when the hash has moved, rather than rebuilding unattended.
+BUILD_HASH="$("$TEMPLATE_DIR/build-hash.sh")"
 HASH_FILE="$SCRIPT_DIR/.build-hash"
 
 # --config points at the hidden devcontainer.json; without it the CLI would look
