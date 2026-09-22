@@ -41,19 +41,35 @@
 # network namespace with `network_mode: "service:devcontainer"` instead of
 # forwarding ports. It then listens on the devcontainer's own loopback.
 #
-# Secrets for the unattended loop (loop.sh) go in a file, not in a line here, so
-# they stay out of git:
+# A secret for the unattended loop (loop.sh) goes in a compose secret, not in an
+# `environment:` line and not in `env_file`. A compose secret arrives as a file
+# at /run/secrets/<name>, so the token never enters the container's environment.
+# It is absent from `docker inspect`, absent from the merged config that start.sh
+# prints at --log-level debug, and it does not pass to the processes Claude
+# starts — an env var reaches every one of them, a file does not:
 #
 #   services:
 #     devcontainer:
-#       env_file: ../.env.loop   # GH_TOKEN=... — fine-grained PAT, only this repo, contents:write
+#       secrets: [gh_token]
+#       environment:
+#         GIT_CONFIG_COUNT: "2"
+#         GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+#         GIT_CONFIG_VALUE_0: "git@github.com:"
+#         GIT_CONFIG_KEY_1: credential.https://github.com.helper
+#         GIT_CONFIG_VALUE_1: "!f() { echo username=x-access-token; echo password=$$(cat /run/secrets/gh_token); }; f"
+#   secrets:
+#     gh_token:
+#       file: ../.gh_token
 #
-# Put `.env.loop` in the PROJECT's .gitignore — this file is committed, that one
-# must not be. The path is relative to .template/, which is why it starts with
-# `../` (see the GOTCHA above). Everything in it reaches `devcontainer exec` and
-# so the loop's tmux session, which is how the loop gets a token to push with.
-# The container has no SSH key, so that token is the only way a push works — see
-# the README's Loop section.
+# The git config is not secret, so it stays in `environment:`. The helper reads
+# the file at push time. `$$` is compose's escape for a literal `$`. Do not add
+# `uid:`, `gid:` or `mode:` to the secret — `docker compose` accepts those keys
+# and ignores them, they work only in swarm.
+#
+# Put `.gh_token` in the PROJECT's .gitignore — this file is committed, that one
+# must not be. Give it mode 600. The path is relative to .template/, which is why
+# it starts with `../` (see the GOTCHA above). The container has no SSH key, so
+# that token is the only way a push works — see the README's Loop section.
 
 services:
   devcontainer: {}

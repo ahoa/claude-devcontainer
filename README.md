@@ -128,7 +128,7 @@ exits 0, so a timer that fires early cannot put two Claudes on one working tree.
 
 The run's output goes to `.loop-state/loop.log` in the repo and to the tmux
 session at the same time; `loop.sh --attach` shows the live session. Put both
-`.loop-state/` and `.env.loop` in the project's `.gitignore`.
+`.loop-state/` and `.gh_token` in the project's `.gitignore`.
 
 ### A systemd user timer
 
@@ -200,7 +200,7 @@ worth.
    the volume survives rebuilds.
 2. The ca plugin on the host: `claude plugin install claude-agents@codeborne`.
    The host owns the version; the container mounts it read-only.
-3. A token for pushing, and the `env_file` line that carries it — below.
+3. A token for pushing, and the compose secret that carries it — below.
 4. `MAX_STORIES=1 ./.devcontainer/loop.sh`, and watch one story go through with
    `--attach` before you let a timer do it.
 
@@ -213,31 +213,31 @@ that accepts them matches every port, SSH included. There is simply no key.
 
 Give the loop a token instead:
 
-1. A fine-grained PAT scoped to this one repository, `contents: write` (plus
-   `pull requests: write` if the runner opens PRs).
-2. `.devcontainer/.env.loop`, mode `600`, listed in the project's `.gitignore`:
+1. A fine-grained PAT scoped to this one repository, `contents: write`.
+2. `.devcontainer/.gh_token`, mode `600`, holding the token and nothing else,
+   listed in the project's `.gitignore`:
 
    ```sh
-   GH_TOKEN=github_pat_...
-   GIT_CONFIG_COUNT=2
-   GIT_CONFIG_KEY_0=credential.https://github.com.helper
-   GIT_CONFIG_VALUE_0=!gh auth git-credential
-   GIT_CONFIG_KEY_1=url.https://github.com/.insteadOf
-   GIT_CONFIG_VALUE_1=git@github.com:
+   printf '%s\n' github_pat_... > .devcontainer/.gh_token
+   chmod 600 .devcontainer/.gh_token
    ```
-
-   `GH_TOKEN` is what `gh` authenticates with. The first pair points git's
-   credential lookup at `gh`, the second rewrites an `origin` of
-   `git@github.com:…` to HTTPS **inside the container only**, so your own pushes
-   from the host keep using SSH. They are environment rather than `git config`
-   because `/home/dev` is not a volume: a `~/.gitconfig` written in the container
-   dies with the next rebuild.
-3. The `env_file` line in `docker-compose.override.yml` — the recipe is in that
+3. The `secrets:` block in `docker-compose.override.yml` — the recipe is in that
    file's comments. Changing it is a build input, so run `./start.sh` once
    afterwards.
 
-`env_file` values reach `devcontainer exec`, and through it the loop's tmux
-session, which is how the runner sees them.
+The token reaches the container as a **file** at `/run/secrets/gh_token`, never
+as an environment variable. The Notes say why that difference matters.
+
+The recipe's `GIT_CONFIG_*` values are not secret, so they stay in
+`environment:`. One points git's credential lookup at a helper that reads the
+token file. The other rewrites an `origin` of `git@github.com:…` to HTTPS
+**inside the container only**, so your own pushes from the host keep using SSH.
+They are environment rather than `git config` because `/home/dev` is not a
+volume: a `~/.gitconfig` written in the container dies with the next rebuild.
+
+Both the file and those variables reach `devcontainer exec`, and through it the
+loop's tmux session, which is how the runner pushes. `gh` stays logged out: a
+push needs git and the helper, not `gh`.
 
 ## Configuration
 
@@ -474,10 +474,19 @@ Install with `--docker off` and mount the real path in
 - **A push from the container goes over HTTPS with a token.** There is no SSH key
   in there and no forwarded agent, so SSH is not an option — not because the
   firewall blocks it (GitHub's ranges are allowed on every port), but because
-  there is no key to offer. See the Loop section for the token and the two lines
-  of git config that use it.
+  there is no key to offer. See the Loop section for the token and the git config
+  that uses it.
+- **That token is a file, not an environment variable**, and the difference is
+  the point. An env var shows up in `docker inspect` for every member of the
+  host's `docker` group. It also lands in the merged compose config that
+  `start.sh` prints at `--log-level debug`. And every process Claude starts —
+  node, Chromium, MCP servers, Gradle — inherits it, then exposes it again in
+  `/proc/<pid>/environ`. A compose secret does none of that. One thing it does
+  not change: whoever reaches the Docker socket can `docker exec` and read the
+  file anyway, which is the trust boundary the socket already sets. Scope the
+  PAT to one repository and give it an expiry.
 - **A loop host is worth more than a laptop.** It holds the Claude login, the
-  Feature Manager token, a `GH_TOKEN` that can write to the repo, and — unless
+  Feature Manager token, a PAT that can write to the repo, and — unless
   installed with `--docker off` — the Docker socket, which is the host itself.
   Close it to the LAN except for SSH, and give each project on it its own login
   volume (`--login project`) so one unattended run cannot read the rest.
