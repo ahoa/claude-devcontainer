@@ -20,8 +20,10 @@
   // allowed hosts every few minutes and copies an edited domains.conf in, so
   // neither a rotating CDN address nor a new host needs a rebuild. --start
   // returns at once (the CLI waits for this command), and replaces the watcher
-  // an earlier start left running.
-  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh && .devcontainer/.template/fw-watch.sh --start",
+  // an earlier start left running. Codex does not start when CODEX_HOME is
+  // missing. The directory is in the Claude config volume, which hides the
+  // image's copy, so the start command makes it.
+  "postStartCommand": "mkdir -p -m 700 \"$CODEX_HOME\" && sudo /usr/local/bin/init-firewall.sh && .devcontainer/.template/fw-watch.sh --start",
   // Runs on the HOST, before the mount. A missing source makes a bind mount
   // fail, and the container does not start.
   "initializeCommand": "mkdir -p ${localEnv:HOME}/.claude/plugins/cache/codeborne/claude-agents",

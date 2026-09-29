@@ -144,7 +144,8 @@ RUN curl -fsSL -o /usr/local/bin/osv-scanner \
 # The cross-model review (/xreview, claude-agents cross-reviewer) runs
 # `codex exec`. Without the binary, the review does not run and reports nothing.
 # CODEX_HOME puts the Codex login in the Claude config volume, so one
-# `codex login --device-auth` survives rebuilds. The OpenAI hosts that Codex
+# `codex login --device-auth` survives rebuilds. postStartCommand in
+# devcontainer.json makes the directory. The OpenAI hosts that Codex
 # calls are in domains-base.conf.
 ENV CODEX_VERSION=0.159.0
 ENV CODEX_HOME=/home/dev/.claude/codex
