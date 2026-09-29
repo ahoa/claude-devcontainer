@@ -140,7 +140,19 @@ RUN curl -fsSL -o /usr/local/bin/osv-scanner \
     && chmod +x /usr/local/bin/osv-scanner \
     && osv-scanner --version
 
-# Project toolchain — anything beyond Node, Java, Playwright and osv-scanner. It lives in
+# ── Codex CLI ────────────────────────────────────────────────────────────────
+# The cross-model review (/xreview, claude-agents cross-reviewer) runs
+# `codex exec`. Without the binary, the review does not run and reports nothing.
+# CODEX_HOME puts the Codex login in the Claude config volume, so one
+# `codex login --device-auth` survives rebuilds. The OpenAI hosts that Codex
+# calls are in domains-base.conf.
+ENV CODEX_VERSION=0.159.0
+ENV CODEX_HOME=/home/dev/.claude/codex
+RUN npm install -g "@openai/codex@${CODEX_VERSION}" \
+    && rm -rf /root/.npm \
+    && codex --version
+
+# Project toolchain — anything beyond Node, Java, Playwright, osv-scanner and Codex. It lives in
 # tools.sh rather than in RUN lines here, because this Dockerfile belongs to the
 # template and is overwritten on update, while tools.sh is yours and is not.
 # Kept last so editing it invalidates no earlier layer, and dropped afterwards so
