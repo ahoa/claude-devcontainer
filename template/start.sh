@@ -131,6 +131,28 @@ if [[ "$LEGACY_COMPOSE_PROJECT" != "$COMPOSE_PROJECT_NAME" ]]; then
     fi
 fi
 
+# The shared base image: everything that is the same in every project, built from
+# .template/base/ with the features in it. The tag is the hash of its inputs, so
+# each project on the same template version finds the image that another project
+# built, and the machine stores one copy. A build happens only when the tag is
+# missing: on the first project of a new template version, or after a prune.
+# The project's Dockerfile starts FROM this tag, through the compose build arg.
+CLAUDE_DEVBASE_IMAGE="$("$TEMPLATE_DIR/build-hash.sh" --base)"
+export CLAUDE_DEVBASE_IMAGE
+if ! docker image inspect "$CLAUDE_DEVBASE_IMAGE" >/dev/null 2>&1; then
+    echo "==> Building the shared base image $CLAUDE_DEVBASE_IMAGE"
+    "$DEVCONTAINER_BIN" build --workspace-folder "$TEMPLATE_DIR" \
+        --config "$TEMPLATE_DIR/base/devcontainer.json" \
+        --image-name "$CLAUDE_DEVBASE_IMAGE"
+    # The base images of older template versions stay behind until removed.
+    OLD_BASES="$(docker images --format '{{.Repository}}:{{.Tag}}' claude-devbase | grep -vxF "$CLAUDE_DEVBASE_IMAGE" || true)"
+    if [[ -n "$OLD_BASES" ]]; then
+        echo "    Older base images are on this machine. A project that is not updated yet still uses one."
+        echo "    Remove one when no project needs it: docker image rm <image>"
+        echo "$OLD_BASES" | sed 's/^/      /'
+    fi
+fi
+
 # The Claude config/login volume, named at install time: claude-shared, which
 # every project from this template mounts, or a volume of this project's own.
 # docker-compose.yml declares it external, so make sure it exists first —

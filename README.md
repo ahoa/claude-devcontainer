@@ -63,6 +63,16 @@ MAX_STORIES=1 ./.devcontainer/loop.sh   # first run: one story
 ./.devcontainer/loop.sh --attach        # watch the live loop session
 ```
 
+The image has two parts. The base image `claude-devbase:<hash>` holds everything
+that is the same in every project: the system packages, Node, Java, Playwright,
+osv-scanner, Codex and the common-utils, claude and github-cli features. Its tag
+is the hash of its inputs, so the projects on one template version share one copy
+on a machine. `start.sh` builds it only when that tag is missing. The project
+image adds the timezone, the firewall lists, `tools.sh` and, with `--docker on`,
+the docker-outside-of-docker feature. After a template update the base of the
+older version stays on disk. `start.sh` lists such images. Remove one with
+`docker image rm` when no project uses it.
+
 `start.sh` hashes the build inputs and rebuilds only when they change. The tmux
 session and the Claude login persist across disconnects and rebuilds, so you can
 detach, reconnect from another machine, and pick up where you left off.
@@ -255,7 +265,8 @@ push needs git and the helper, not `gh`.
 │
 └── .template/                   machinery — hidden, never edit
     ├── devcontainer.json        (+ devcontainer-lock.json)
-    ├── Dockerfile
+    ├── Dockerfile               the project layer, FROM the shared base
+    ├── base/                    the shared base image (Dockerfile, devcontainer.json, lock)
     ├── docker-compose.yml
     ├── init-firewall.sh         (+ domains-base.conf)
     ├── fw-watch.sh
@@ -353,16 +364,16 @@ them. Fine for an experiment; fork the template for anything you want to keep.
 
 | Knob | File | What it does |
 |------|------|--------------|
-| `NODE_MAJOR` | `.template/Dockerfile` | Node LTS line (currently `24`) |
-| `openjdk-25-jdk-headless` | `.template/Dockerfile` | JDK package; another LTS, or `jre` for a smaller image |
-| `PLAYWRIGHT_VERSION` | `.template/Dockerfile` | Playwright release whose headless Chromium is baked in (currently `1.62.1`). Drop the whole `RUN` line to save ~680 MB in a project that never runs browser tests |
-| `OSV_SCANNER_VERSION` | `.template/Dockerfile` | osv-scanner release baked in (currently `2.5.1`). The `/review` dependency audit runs it against `gradle.lockfile` and `pom.xml`; it needs `api.osv.dev`, which `domains-base.conf` allows |
-| `CODEX_VERSION` | `.template/Dockerfile` | Codex CLI release baked in (currently `0.159.0`). `/xreview` runs `codex exec`. `CODEX_HOME` keeps its login in the Claude config volume, and `domains-base.conf` allows the OpenAI hosts. Log in once with `codex login --device-auth` in the container: the browser flow of `codex login` waits on a port in the container, which the host browser cannot reach |
-| `ENV` block | `.template/Dockerfile` | `CLAUDE_CONFIG_DIR`, `SHELL`, `LANG`, `COLORTERM`, `DISABLE_AUTOUPDATER` |
+| `NODE_MAJOR` | `.template/base/Dockerfile` | Node LTS line (currently `24`) |
+| `openjdk-25-jdk-headless` | `.template/base/Dockerfile` | JDK package; another LTS, or `jre` for a smaller image |
+| `PLAYWRIGHT_VERSION` | `.template/base/Dockerfile` | Playwright release whose headless Chromium is baked in (currently `1.62.1`). Drop the whole `RUN` line to save ~680 MB in a project that never runs browser tests |
+| `OSV_SCANNER_VERSION` | `.template/base/Dockerfile` | osv-scanner release baked in (currently `2.5.1`). The `/review` dependency audit runs it against `gradle.lockfile` and `pom.xml`; it needs `api.osv.dev`, which `domains-base.conf` allows |
+| `CODEX_VERSION` | `.template/base/Dockerfile` | Codex CLI release baked in (currently `0.159.0`). `/xreview` runs `codex exec`. `CODEX_HOME` keeps its login in the Claude config volume, and `domains-base.conf` allows the OpenAI hosts. Log in once with `codex login --device-auth` in the container: the browser flow of `codex login` waits on a port in the container, which the host browser cannot reach |
+| `ENV` block | `.template/base/Dockerfile` | `CLAUDE_CONFIG_DIR`, `SHELL`, `LANG`, `COLORTERM`, `DISABLE_AUTOUPDATER` |
 | `extra_hosts` | `.template/docker-compose.yml` | Makes `host.docker.internal` exist on Linux Docker Engine |
 | `domains-base.conf` | `.template/` | Baseline outbound hosts; template-owned so updates can extend it |
 | `tmux.conf` | `.template/` | Prefix, mouse, scrollback, truecolor, clipboard, copy mode |
-| Feature list | `.template/devcontainer.json` + lock | `common-utils`, Claude, `github-cli`, pinned by digest. `docker-outside-of-docker` joins them when the install answered `--docker on` |
+| Feature list | `.template/base/devcontainer.json` + lock | `common-utils`, Claude, `github-cli`, pinned by digest, in the base image. `docker-outside-of-docker` is in `.template/devcontainer.json` + lock, present when the install answered `--docker on` |
 | `--dangerously-skip-permissions` | `start.sh`, `attach.sh` | How Claude is launched |
 
 To make such a change permanent, fork this repo and install from the fork — it is
@@ -483,7 +494,10 @@ Install with `--docker off` and mount the real path in
   hands over the host. `--docker on` is the default because tests that start their
   own containers need it. Answer `off` for a project that does not, and nothing in
   the container can reach Docker. A project that needs the socket at a different
-  path (rootless Docker) mounts it in `docker-compose.override.yml`.
+  path (rootless Docker) mounts it in `docker-compose.override.yml`. The socket
+  also reaches the shared base image `claude-devbase:<hash>`. A container with the
+  socket can put another image under that tag, and every project on the machine,
+  `--docker off` projects too, builds on it at the next rebuild.
 - **The host is reachable on every port.** The firewall allows whatever
   `host.docker.internal` resolves to, because your application runs there — which
   also puts other projects' databases, your IDE's built-in server and SSH within

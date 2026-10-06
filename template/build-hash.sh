@@ -8,6 +8,7 @@
 #
 #   build-hash.sh           print the hash of the inputs as they are now
 #   build-hash.sh --check    exit 0 when .build-hash matches, 1 when it does not
+#   build-hash.sh --base     print the tag of the shared base image
 #
 # `devcontainer up` REUSES an existing container as-is — it does not notice an
 # edited Dockerfile (or any other build input) and will happily re-attach to a
@@ -24,13 +25,27 @@ TEMPLATE_DIR="$(cd "$(dirname "$0")" && pwd)"
 # .devcontainer/ — where the user-owned build inputs and .build-hash live.
 DEVCONTAINER_DIR="$(cd "$TEMPLATE_DIR/.." && pwd)"
 
+# The glob below sorts by locale. Two hosts with different locales would put the
+# base files in another order, get another hash, and share no base image.
+export LC_ALL=C
+
+# The inputs of the shared base image: every file in base/, so a new file there
+# changes the tag without an edit here. The tag is their hash, so the hash must
+# not depend on the project: none of these files holds a placeholder.
+BASE_INPUTS=(
+    "$TEMPLATE_DIR"/base/*
+    "$TEMPLATE_DIR/tmux.conf"
+)
+
+# The base inputs are project inputs too: a new base needs a new project image.
 BUILD_INPUTS=(
+    "${BASE_INPUTS[@]}"
     "$TEMPLATE_DIR/Dockerfile"
     "$TEMPLATE_DIR/docker-compose.yml"
-    "$TEMPLATE_DIR/tmux.conf"
     "$TEMPLATE_DIR/init-firewall.sh"
     "$TEMPLATE_DIR/domains-base.conf"
     "$TEMPLATE_DIR/devcontainer.json"
+    "$TEMPLATE_DIR/devcontainer-lock.json"
     "$DEVCONTAINER_DIR/tools.sh"
     "$DEVCONTAINER_DIR/domains.conf"
     "$DEVCONTAINER_DIR/firewall.sh"
@@ -47,6 +62,11 @@ if command -v sha256sum >/dev/null 2>&1; then
 else
     SHA_CMD=(shasum -a 256)
 fi
+if [[ "${1:-}" == "--base" ]]; then
+    echo "claude-devbase:$(cat "${BASE_INPUTS[@]}" | "${SHA_CMD[@]}" | cut -c1-12)"
+    exit 0
+fi
+
 BUILD_HASH="$(cat "${BUILD_INPUTS[@]}" 2>/dev/null | "${SHA_CMD[@]}" | cut -d' ' -f1)"
 
 if [[ "${1:-}" == "--check" ]]; then

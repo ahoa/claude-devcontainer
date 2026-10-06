@@ -1,0 +1,34 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// DO NOT CHANGE THIS FILE. It belongs to the devcontainer template and is
+// overwritten whenever the template is updated.
+//
+// The build of the base image only. start.sh runs `devcontainer build` with this
+// file. No container starts from it: the project's container comes from
+// ../devcontainer.json, which builds on top of this image.
+//
+// The features below go into the base, because every project has the same ones.
+// Their lifecycle commands (the claude feature writes into ~/.zshrc) travel in
+// the image's devcontainer.metadata label, and the CLI reads that label when it
+// starts the project's container. docker-outside-of-docker is not here. It is
+// present only when the install mounts the host Docker socket, so it stays in
+// ../devcontainer.json.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  "name": "claude-devbase",
+  "build": {
+    "dockerfile": "Dockerfile",
+    // .template/, for tmux.conf.
+    "context": ".."
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {},
+    "ghcr.io/aivar-codeborne/devcontainer-features/claude:1.0.7": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "overrideFeatureInstallOrder": [
+    "ghcr.io/devcontainers/features/common-utils:2"
+  ],
+  // The features read the user from here: common-utils gives it sudo, and claude
+  // installs into its home.
+  "remoteUser": "dev"
+}

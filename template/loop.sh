@@ -28,6 +28,10 @@ TEMPLATE_DIR="$SCRIPT_DIR/.template"
 # project name that start.sh created it under. See start.sh for details.
 COMPOSE_PROJECT_NAME="$(awk -F': *' '/^name:/{print $2; exit}' "$TEMPLATE_DIR/docker-compose.yml")"
 export COMPOSE_PROJECT_NAME
+# The same base image tag as start.sh gives the build. `up` below builds nothing
+# when the container is there, but compose resolves the build arg either way.
+CLAUDE_DEVBASE_IMAGE="$("$TEMPLATE_DIR/build-hash.sh" --base)"
+export CLAUDE_DEVBASE_IMAGE
 
 # No install-on-demand here, unlike start.sh. Everything this script does at night
 # has to be something it can also do at 03:00 with nobody watching, and reaching

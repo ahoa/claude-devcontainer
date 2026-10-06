@@ -46,6 +46,11 @@ HIDDEN_FILES=(
     ca-plugin-flag.sh
     ca-claude.zsh
     build-hash.sh
+    # The shared base image, which every project from one template version
+    # builds identically (start.sh).
+    base/Dockerfile
+    base/devcontainer.json
+    base/devcontainer-lock.json
 )
 # Template-owned but visible, because these are the commands you run. They pass
 # --config to the devcontainer CLI, which is what lets devcontainer.json live in
@@ -719,7 +724,7 @@ done
 # form is what an "off" install reads in .devcontainer/.template/.
 if [[ "$DOCKER_SOCKET" == "on" ]]; then
     DOCKER_SOCK_MOUNT="- /var/run/docker.sock:/var/run/docker.sock"
-    DOCKER_FEATURE='"ghcr.io/devcontainers/features/docker-outside-of-docker:1": { "moby": false },'
+    DOCKER_FEATURE='"ghcr.io/devcontainers/features/docker-outside-of-docker:1": { "moby": false }'
 else
     DOCKER_SOCK_MOUNT="# not mounted — this project was installed with --docker off"
     DOCKER_FEATURE='// not installed — this project was installed with --docker off'
@@ -746,7 +751,7 @@ MIGRATED_OPEN_PORTS=""
 MIGRATED_FORWARDS=0
 migrate_pre_split_config
 
-mkdir -p "$DEST/$TEMPLATE_SUBDIR"
+mkdir -p "$DEST/$TEMPLATE_SUBDIR/base"
 KEPT_FILES=()
 for f in "${TEMPLATE_FILES[@]}"; do
     dest="$(dest_path "$f")"

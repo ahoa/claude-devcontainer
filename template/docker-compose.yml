@@ -15,6 +15,11 @@ services:
     build:
       context: ..
       dockerfile: .template/Dockerfile
+      args:
+        # The shared base image. start.sh builds it and sets the variable. The
+        # default is only for a compose call without start.sh, and a build then
+        # stops with a clear "claude-devbase:missing not found".
+        BASE_IMAGE: ${CLAUDE_DEVBASE_IMAGE:-claude-devbase:missing}
     cap_add:
       - NET_ADMIN
       - NET_RAW

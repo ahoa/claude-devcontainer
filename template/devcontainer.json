@@ -35,16 +35,11 @@
   // build, so the Dockerfile cannot override it. Append ours after it, once per
   // container creation.
   "postCreateCommand": "grep -q CA_PLUGIN_CACHE ~/.zshrc || cat .devcontainer/.template/ca-claude.zsh >> ~/.zshrc",
+  // common-utils, claude and github-cli are in the base image (base/devcontainer.json).
   "features": {
-    "ghcr.io/devcontainers/features/common-utils:2": {},
-    "ghcr.io/aivar-codeborne/devcontainer-features/claude:1.0.7": {},
     // Substituted by the installer. Present only when the install mounted the
     // host Docker socket, because without the socket there is no daemon to reach.
     __DOCKER_FEATURE__
-    "ghcr.io/devcontainers/features/github-cli:1": {}
   },
-  "overrideFeatureInstallOrder": [
-    "ghcr.io/devcontainers/features/common-utils:2"
-  ],
   "remoteUser": "dev"
 }
