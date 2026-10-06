@@ -40,8 +40,13 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 # /etc/sudoers.d/dev with NOPASSWD:ALL. Run `sudo -l` in the container to see it.
 # So the runtime firewall is a guardrail against a mistake or a stray command, not
 # a boundary that holds against the agent: root in here can flush the rules.
-RUN groupadd --gid 1001 dev \
-    && useradd --uid 1001 --gid dev --create-home --shell /bin/zsh dev
+#
+# UID and GID 1000, because that is the first user on a usual Linux host. When the
+# host UID is the same, the devcontainer CLI does not remap the user, and the
+# image gets no re-chowned copy of /home/dev as an extra layer (about 240 MB). A
+# host with a different UID still gets the remap. On macOS the CLI never remaps.
+RUN groupadd --gid 1000 dev \
+    && useradd --uid 1000 --gid dev --create-home --shell /bin/zsh dev
 
 # Relocate ALL of Claude's state (login token + .claude.json + sessions) into a
 # single directory so one named volume persists it across rebuilds. With

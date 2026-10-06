@@ -23,7 +23,11 @@
   // an earlier start left running. Codex does not start when CODEX_HOME is
   // missing. The directory is in the Claude config volume, which hides the
   // image's copy, so the start command makes it.
-  "postStartCommand": "mkdir -p -m 700 \"$CODEX_HOME\" && sudo /usr/local/bin/init-firewall.sh && .devcontainer/.template/fw-watch.sh --start",
+  //
+  // The chown comes first. The `dev` user had UID 1001 before, so on macOS, where
+  // the CLI does not remap the UID, the config volume can belong to the old UID.
+  // The chown gives it to the current `dev` once and is skipped after that.
+  "postStartCommand": "{ [ \"$(stat -c %u \"$CLAUDE_CONFIG_DIR\")\" = \"$(id -u)\" ] || sudo chown -R dev:dev \"$CLAUDE_CONFIG_DIR\"; } && mkdir -p -m 700 \"$CODEX_HOME\" && sudo /usr/local/bin/init-firewall.sh && .devcontainer/.template/fw-watch.sh --start",
   // Runs on the HOST, before the mount. A missing source makes a bind mount
   // fail, and the container does not start.
   "initializeCommand": "mkdir -p ${localEnv:HOME}/.claude/plugins/cache/codeborne/claude-agents",
