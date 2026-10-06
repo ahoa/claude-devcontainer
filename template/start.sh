@@ -138,6 +138,41 @@ fi
 CLAUDE_VOLUME="__CLAUDE_VOLUME__"
 docker volume create "$CLAUDE_VOLUME" >/dev/null
 
+# An external network in docker-compose.override.yml must exist before `up`, or
+# compose stops with "declared as external, but could not be found". Usually the
+# network belongs to the project's own dev stack, and nobody started that stack on
+# a new machine. So create each missing external network here.
+#
+# A plain `docker network create` is not sufficient. The compose project that owns
+# the network later refuses a network without its labels ("has incorrect label
+# com.docker.compose.network"). Thus each network gets the two labels that compose
+# itself writes. If the override declares `labels:` with these two keys on the
+# network, they are used. If not, the name is read as compose names a network,
+# <project>_<key>, and the last "_" divides the two. A name without "_" gets no
+# labels. npm is required above, so node is available to read the JSON.
+#
+# If `compose config` fails, nothing is created here. `up` then shows the error.
+if NETWORKS_JSON="$(docker compose -f "$TEMPLATE_DIR/docker-compose.yml" -f "$SCRIPT_DIR/docker-compose.override.yml" config --format json 2>/dev/null)"; then
+    while IFS='|' read -r net owner key; do
+        [[ -z "$net" ]] && continue
+        docker network inspect "$net" >/dev/null 2>&1 && continue
+        LABELS=()
+        [[ -n "$owner" ]] && LABELS+=(--label "com.docker.compose.project=$owner")
+        [[ -n "$key" ]] && LABELS+=(--label "com.docker.compose.network=$key")
+        echo "==> Creating the external network '$net' (compose project '${owner:-none}', network '${key:-none}')"
+        docker network create "${LABELS[@]+"${LABELS[@]}"}" "$net" >/dev/null
+    done < <(node -e '
+        const config = JSON.parse(require("fs").readFileSync(0, "utf8"));
+        for (const net of Object.values(config.networks || {})) {
+            if (!net.external) continue;
+            const labels = net.labels || {};
+            const parts = /^(.+)_([^_]+)$/.exec(net.name) || [];
+            const owner = labels["com.docker.compose.project"] ?? parts[1] ?? "";
+            const key = labels["com.docker.compose.network"] ?? parts[2] ?? "";
+            console.log([net.name, owner, key].join("|"));
+        }' <<<"$NETWORKS_JSON")
+fi
+
 # `devcontainer up` builds the image, starts the compose stack, applies the
 # features declared in devcontainer.json, and runs the postStartCommand
 # (firewall init).

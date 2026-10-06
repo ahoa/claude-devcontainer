@@ -320,6 +320,32 @@ services:
 Relative paths in the override resolve against `.template/`, since that is where
 the base compose file lives: `../data` is `.devcontainer/data`.
 
+To join the network of the project's own dev stack, declare that network as
+external. `start.sh` creates each missing external network before `up`, so the
+container also starts on a machine where nobody started the dev stack:
+
+```yaml
+services:
+  devcontainer:
+    networks: [default, app]
+networks:
+  app:
+    name: myapp_default   # the dev stack's network: <compose project>_<network key>
+    external: true
+```
+
+The dev stack later accepts the network only when it carries the compose labels
+of its owner. `start.sh` reads them from the name: the text before the last `_`
+is the compose project, and the text after it is the network key. When the name
+does not follow that pattern, put the two labels on the network in the override.
+`start.sh` then uses these labels:
+
+```yaml
+    labels:
+      com.docker.compose.project: myapp
+      com.docker.compose.network: back_end
+```
+
 ### Knobs that do not survive an update
 
 These work, but they live in template-owned files, so the next update replaces
