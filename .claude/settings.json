@@ -28,7 +28,11 @@
       "mcp__stories__promote_learning",
       "mcp__stories__log_metric",
       "mcp__stories__get_metrics_trend",
-      "mcp__stories__get_story_metrics"
+      "mcp__stories__get_story_metrics",
+      "Bash(*/.claude/hooks/lib/loop-log.sh*)",
+      "mcp__stories__add_labels",
+      "mcp__stories__remove_labels",
+      "mcp__stories__increment_attempt"
     ]
   },
   "statusLine": {
