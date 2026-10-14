@@ -415,6 +415,17 @@ rewritten, your four are left alone, and the changed build inputs make the next
 `.devcontainer/`, so `git diff` afterwards shows exactly what changed and
 `git checkout` undoes it; `--force` overrides.
 
+**Update every project that mounts `claude-shared` at the same time.** Since
+`31bd592` (2026-10-06) the `dev` user is UID 1000. Before that it was UID 1001.
+The first start of an updated project gives the volume to UID 1000, because
+`postStartCommand` re-owns it when another UID owns it. A project that is not
+updated yet still runs as UID 1001, so its Claude cannot save its login or its
+sessions. `/login` then reports that the credentials file is not writable, and
+the `SessionStart` hook fails with `EACCES` under `session-env/`. `start.sh`
+prints a warning before a start that re-owns the volume and names the
+containers that mount it. A `<name>_claude` volume has no other project to
+break.
+
 ### Projects installed before `update.sh` existed
 
 Bootstrap them with the installer, run in the project directory — no arguments, it

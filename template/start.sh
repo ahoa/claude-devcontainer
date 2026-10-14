@@ -160,6 +160,37 @@ fi
 CLAUDE_VOLUME="__CLAUDE_VOLUME__"
 docker volume create "$CLAUDE_VOLUME" >/dev/null
 
+# The login volume is shared, and postStartCommand (devcontainer.json) gives it
+# to this container's `dev` user when another UID owns it. `dev` has UID 1000
+# from base/Dockerfile, and had UID 1001 before. So the first start after that
+# update takes the volume from every project that still runs the old template.
+# Such a project cannot save its Claude login or its sessions until its own
+# update. The probe runs on the host, so the warning comes before the chown. On
+# Linux the CLI gives `dev` the host UID. On macOS it keeps the UID from
+# base/Dockerfile. An empty volume (first start) gets its owner from the image,
+# so the probe prints nothing for it. A failed probe is silent. A warning must
+# never stop a start.
+if [[ "$(uname -s)" == "Linux" ]]; then
+    DEV_UID="$(id -u)"
+else
+    DEV_UID="$(grep -m1 -oE 'useradd --uid [0-9]+' "$TEMPLATE_DIR/base/Dockerfile" | grep -oE '[0-9]+$' || true)"
+fi
+VOLUME_UID="$(docker run --rm --user 0 --entrypoint sh -v "$CLAUDE_VOLUME:/v:ro" "$CLAUDE_DEVBASE_IMAGE" \
+    -c '[ -n "$(ls -A /v)" ] && stat -c %u /v' 2>/dev/null || true)"
+if [[ -n "$DEV_UID" && -n "$VOLUME_UID" && "$VOLUME_UID" != "$DEV_UID" ]]; then
+    {
+        echo "WARNING: the volume '$CLAUDE_VOLUME' belongs to UID $VOLUME_UID, but the 'dev' user in this container is UID $DEV_UID."
+        echo "         This start gives the volume to UID $DEV_UID."
+        echo "         A project on an older template still runs as UID $VOLUME_UID. Its Claude then cannot save its login or its sessions."
+        echo "         Update each project that mounts '$CLAUDE_VOLUME' (./.devcontainer/update.sh), then start it again."
+        OTHERS="$(docker ps -a --filter "volume=$CLAUDE_VOLUME" --format '{{.Names}}' 2>/dev/null | grep -v "^$COMPOSE_PROJECT_NAME-" || true)"
+        if [[ -n "$OTHERS" ]]; then
+            echo "         Containers that mount the volume:"
+            echo "$OTHERS" | sed 's/^/           /'
+        fi
+    } >&2
+fi
+
 # An external network in docker-compose.override.yml must exist before `up`, or
 # compose stops with "declared as external, but could not be found". Usually the
 # network belongs to the project's own dev stack, and nobody started that stack on
