@@ -23,7 +23,8 @@ whether the container gets the host Docker socket. In a project that already has
 pressing Enter five times keeps it.
 
 Prompts are read from your terminal rather than stdin, so the interactive flow
-works through the pipe. ([Read the script first](install.sh) if you'd rather not
+works through the pipe. ([Read the script first](install.sh), and the parts in
+[installer/](installer/) it sources from the same archive, if you'd rather not
 pipe an unread one into your shell.) To answer up front, or to install somewhere
 other than the current directory:
 
