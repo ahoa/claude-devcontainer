@@ -32,7 +32,8 @@
       "Bash(*/.claude/hooks/lib/loop-log.sh*)",
       "mcp__stories__add_labels",
       "mcp__stories__remove_labels",
-      "mcp__stories__increment_attempt"
+      "mcp__stories__increment_attempt",
+      "Bash(*/.claude/hooks/lib/deploy-env-check.sh*)"
     ]
   },
   "statusLine": {
