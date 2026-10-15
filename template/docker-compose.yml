@@ -45,11 +45,13 @@ services:
       # substitutes ${HOME} from the host environment. It is empty on a Windows
       # host, and the scripts then report a missing plugin.
       - ${HOME}/.claude/plugins/cache/codeborne/claude-agents:${HOME}/.claude/plugins/cache/codeborne/claude-agents:ro
-      # The host Docker daemon socket, mounted only when the install asked for it
-      # (--docker on, which is the default). It lets this container drive the host
-      # daemon, and that by itself amounts to control of the host — see the
-      # security notes in the README. The installer substitutes the line below.
-      __DOCKER_SOCK_MOUNT__
+      # The host Docker socket is not mounted here. With --docker on, the
+      # docker-outside-of-docker feature in devcontainer.json mounts it at
+      # /var/run/docker-host.sock, and the feature's entrypoint proxies it to
+      # /var/run/docker.sock with socat, owned by dev. A second mount on
+      # /var/run/docker.sock breaks that proxy: the entrypoint cannot remove a
+      # mountpoint, so it stops before socat starts, and dev is left with the
+      # host's root-owned socket.
     command: sleep infinity
 
 volumes:

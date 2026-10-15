@@ -70,6 +70,12 @@ if ! PROBE="$("$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" --confi
     exit 1
 fi
 
+# Can dev reach the host Docker daemon? A warning, not a stop, see start.sh.
+# Nothing supervises the socket proxy, so this is where a proxy that died since
+# the last start gets started again.
+"$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" --config "$TEMPLATE_DIR/devcontainer.json" \
+    .devcontainer/.template/docker-check.sh || true
+
 # The ca plugin: the flag comes from the host, where the plugin is installed.
 # tmux starts Claude through a non-interactive zsh, which does not read
 # ~/.zshrc, so the claude() function there never reaches this session.

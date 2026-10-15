@@ -42,6 +42,7 @@ HIDDEN_FILES=(
     init-firewall.sh
     domains-base.conf
     fw-watch.sh
+    docker-check.sh
     tmux.conf
     ca-plugin-flag.sh
     ca-claude.zsh
@@ -79,7 +80,7 @@ USER_FILES=(
 # All files the template must provide (used to detect a complete template dir).
 TEMPLATE_FILES=("${MACHINERY_FILES[@]}" "${USER_FILES[@]}")
 # Files that get the executable bit, as installed paths.
-EXECUTABLE_FILES=(start.sh attach.sh loop.sh update.sh update-fw.sh .template/init-firewall.sh .template/fw-watch.sh .template/build-hash.sh tools.sh)
+EXECUTABLE_FILES=(start.sh attach.sh loop.sh update.sh update-fw.sh .template/init-firewall.sh .template/fw-watch.sh .template/docker-check.sh .template/build-hash.sh tools.sh)
 # Where the hidden machinery goes, relative to .devcontainer/.
 TEMPLATE_SUBDIR=".template"
 # What the devcontainer's compose project name adds to the project name. The
@@ -104,10 +105,10 @@ Options:
   --login MODE      Where Claude's login lives: 'shared' (one login for every
                     project from this template) or 'project' (a login of this
                     project's own). Default shared. Prompted if omitted.
-  --docker MODE     'on' mounts the host Docker socket into the container, which
-                    also gives it control of the host. 'off' leaves it out, and
-                    drops the docker-outside-of-docker feature with it. Default
-                    on. Prompted if omitted.
+  --docker MODE     'on' gives the container the host Docker socket, through the
+                    docker-outside-of-docker feature, which also gives it control
+                    of the host. 'off' leaves the feature out. Default on.
+                    Prompted if omitted.
   --force           Overwrite an existing .devcontainer/ and ignore name conflicts.
   -h, --help        Show this help.
 
@@ -307,11 +308,21 @@ detect_existing_answers() {
             EXISTING_LOGIN="project"
         fi
     fi
-    # Every install from before this question existed mounted the socket.
+    # Without a stamp, the feature line in devcontainer.json tells: an "off"
+    # install has it commented out. Every install from before this question
+    # existed had the feature, and mounted the socket in its compose file too,
+    # so the compose file is the second witness.
+    if [[ -z "$EXISTING_DOCKER" ]]; then
+        for f in "$dest/.template/devcontainer.json" "$dest/devcontainer.json"; do
+            [[ -f "$f" ]] || continue
+            grep -q '^ *"ghcr.io/devcontainers/features/docker-outside-of-docker' "$f" && EXISTING_DOCKER="on"
+            break
+        done
+    fi
     if [[ -z "$EXISTING_DOCKER" ]]; then
         for f in "$dest/.template/docker-compose.yml" "$dest/docker-compose.yml"; do
             [[ -f "$f" ]] || continue
-            if grep -q '/var/run/docker\.sock' "$f"; then
+            if grep -q '^ *- */var/run/docker\.sock:' "$f"; then
                 EXISTING_DOCKER="on"
             else
                 EXISTING_DOCKER="off"
@@ -705,9 +716,12 @@ fi
 # on  — the container drives the host Docker daemon, which tests that start their
 #       own containers need. It is also control of the host: a container that can
 #       reach that socket can start a privileged one, so this is the loosest part
-#       of the sandbox by a wide margin.
-# off — no socket and no docker-outside-of-docker feature. Nothing in the
-#       container can reach Docker.
+#       of the sandbox by a wide margin. The docker-outside-of-docker feature
+#       mounts the socket and proxies it to dev. Nothing else may mount it: a
+#       second mount on /var/run/docker.sock stops the feature's proxy, and dev
+#       is left with the host's root-owned socket (see docker-compose.yml).
+# off — no docker-outside-of-docker feature. Nothing in the container can reach
+#       Docker.
 while :; do
     if [[ -z "$DOCKER_SOCKET" ]]; then
         prompt_user DOCKER_SOCKET "Mount the host Docker socket? It gives the container control of the host. [on/off, ${EXISTING_DOCKER:-on}]: " || true
@@ -720,13 +734,11 @@ while :; do
     if [[ $DOCKER_FROM_ARG -eq 1 ]] || ! have_tty; then exit 1; fi
     DOCKER_SOCKET=""
 done
-# Both placeholders sit on a line of their own in the template, so the comment
-# form is what an "off" install reads in .devcontainer/.template/.
+# The placeholder sits on a line of its own in the template, so the comment form
+# is what an "off" install reads in .devcontainer/.template/.
 if [[ "$DOCKER_SOCKET" == "on" ]]; then
-    DOCKER_SOCK_MOUNT="- /var/run/docker.sock:/var/run/docker.sock"
     DOCKER_FEATURE='"ghcr.io/devcontainers/features/docker-outside-of-docker:1": { "moby": false }'
 else
-    DOCKER_SOCK_MOUNT="# not mounted — this project was installed with --docker off"
     DOCKER_FEATURE='// not installed — this project was installed with --docker off'
 fi
 
@@ -775,7 +787,6 @@ for f in "${TEMPLATE_FILES[@]}"; do
         -e "s|__TMUX_WINDOWS__|$TMUX_WINDOWS|g" \
         -e "s|__TIMEZONE__|$TIMEZONE|g" \
         -e "s|__CLAUDE_VOLUME__|$CLAUDE_VOLUME|g" \
-        -e "s|__DOCKER_SOCK_MOUNT__|$DOCKER_SOCK_MOUNT|g" \
         -e "s|__DOCKER_FEATURE__|$DOCKER_FEATURE|g" \
         "$PENDING_WRITE"
     rm -f "$PENDING_WRITE.bak"

@@ -235,6 +235,12 @@ fi
 # Only reached on a successful `up` (set -e aborts earlier on failure).
 echo "$BUILD_HASH" > "$HASH_FILE"
 
+# Can dev reach the host Docker daemon? A warning, not a stop: a session without
+# Docker still has uses, and the check starts a dead socket proxy again by
+# itself. loop.sh refuses on the same check, with nobody there to read a warning.
+"$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" --config "$TEMPLATE_DIR/devcontainer.json" \
+    .devcontainer/.template/docker-check.sh || true
+
 # The ca plugin: the flag comes from the host, where the plugin is installed.
 # tmux starts Claude through a non-interactive zsh, which does not read
 # ~/.zshrc, so the claude() function there never reaches this session.

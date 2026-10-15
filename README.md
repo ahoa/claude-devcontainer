@@ -37,7 +37,7 @@ other than the current directory:
 | `--windows N` | tmux windows, each running its own Claude (default `1`) |
 | `--timezone ZONE` | IANA timezone for the container clock (default `Europe/Tallinn`) |
 | `--login MODE` | `shared` (default) — one Claude login for every project from this template — or `project`, a login of this project's own |
-| `--docker MODE` | `on` (default) mounts the host Docker socket, which also gives the container control of the host. `off` leaves the socket out and drops the `docker-outside-of-docker` feature with it |
+| `--docker MODE` | `on` (default) gives the container the host Docker socket through the `docker-outside-of-docker` feature, which also gives the container control of the host. `off` leaves the feature out, and nothing in the container can reach Docker |
 | `--force` | Overwrite an existing `.devcontainer/` and reuse conflicting Docker objects |
 
 | Env var | Meaning |
@@ -194,6 +194,13 @@ the work, `.loop-state/loop.log` shows what it did.
 `ExecStartPre=/usr/bin/docker info` keeps a boot-time firing from starting before
 the daemon is up: the unit fails cleanly instead of leaving a half-started
 container behind.
+
+`loop.sh` makes the same check inside the container, as `dev`, before it starts
+the run. With `--docker on` the socket reaches `dev` through a socat proxy that
+the `docker-outside-of-docker` feature starts, and nothing supervises that proxy.
+The check starts it again when it is gone. When Docker still does not answer,
+`loop.sh` refuses, because every story of the night would otherwise stop at the
+same place, in E2E. `start.sh` and `attach.sh` run the same check and only warn.
 
 Several projects on one host each get their own timer instance with its own
 `OnCalendar` — they share one Docker daemon and one CPU, and two Claudes

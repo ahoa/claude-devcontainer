@@ -81,6 +81,15 @@ fi
 # stopped. Quiet, because the interesting output of a loop run is in its own log.
 "$DEVCONTAINER_BIN" up "${DEVCONTAINER_ARGS[@]}" >/dev/null
 
+# Every story's E2E needs Docker, so one dead socket proxy would stop every story
+# of the night at the same place. The check starts the proxy again when it can,
+# and this script refuses when it cannot. A --docker off install passes: it has
+# no Docker to check.
+if ! "$DEVCONTAINER_BIN" exec "${DEVCONTAINER_ARGS[@]}" .devcontainer/.template/docker-check.sh; then
+    echo "ERROR: dev cannot use Docker in the container. The loop does not start without it." >&2
+    exit 1
+fi
+
 # The ca plugin: the flag comes from the host, where the plugin is installed, and
 # docker-compose.yml mounts that directory into the container at the same absolute
 # path. An interactive session may start without the plugin — ca-plugin-flag.sh

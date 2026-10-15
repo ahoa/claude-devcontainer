@@ -37,8 +37,11 @@
   "postCreateCommand": "grep -q CA_PLUGIN_CACHE ~/.zshrc || cat .devcontainer/.template/ca-claude.zsh >> ~/.zshrc",
   // common-utils, claude and github-cli are in the base image (base/devcontainer.json).
   "features": {
-    // Substituted by the installer. Present only when the install mounted the
-    // host Docker socket, because without the socket there is no daemon to reach.
+    // Substituted by the installer. Present only when the install asked for the
+    // host Docker socket (--docker on). The feature mounts the socket itself, at
+    // /var/run/docker-host.sock, and its entrypoint proxies it to
+    // /var/run/docker.sock for dev. docker-compose.yml must not mount the socket
+    // as well, see the note there. docker-check.sh tells when the proxy is gone.
     __DOCKER_FEATURE__
   },
   "remoteUser": "dev"
