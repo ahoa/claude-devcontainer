@@ -156,6 +156,10 @@ Give the container a token instead:
 The token reaches the container as a **file** at `/run/secrets/gh_token`, never
 as an environment variable. The Notes say why that difference matters.
 
+The firewall setup reads the same file. It gets the GitHub address ranges from
+`api.github.com/meta` on each container start, and with the token that call
+counts against a limit of 5000 an hour instead of 60.
+
 The recipe's `GIT_CONFIG_*` values are not secret, so they stay in
 `environment:`. One points git's credential lookup at a helper that reads the
 token file. The other rewrites an `origin` of `git@github.com:…` to HTTPS
@@ -313,7 +317,7 @@ CLAUDE_DEVCONTAINER_REPO=https://github.com/you/your-fork ./install.sh --name my
 
 `install.sh` records the commit it installed from in
 `.devcontainer/.template-version` — commit that file. `start.sh` compares it
-against the repo on every run (SHA cached for a day, 5 s timeout, silent offline)
+against the repo on every run (SHA cached for a day, 10 s timeout, silent offline)
 and prints one line when a newer template exists:
 
 ```
@@ -325,6 +329,13 @@ and prints one line when a newer template exists:
 ./.devcontainer/update.sh --check    # just report; exit 1 = update available
 ./.devcontainer/update.sh --ref v2   # update to a specific branch, tag or commit
 ```
+
+`update.sh` finds the latest commit with `git ls-remote`, which has no rate
+limit. Only a host without git uses the GitHub API. The API allows 60 calls an
+hour per IP address without a token, and every device behind the same NAT
+shares that limit. With `GITHUB_TOKEN` set or `gh` logged in, `update.sh`
+sends the token, and the limit is 5000. When the limit is used up, the error
+says so and gives the reset time.
 
 An update is the installer re-run at a newer commit: template-owned files are
 rewritten, your four are left alone, and the changed build inputs make the next

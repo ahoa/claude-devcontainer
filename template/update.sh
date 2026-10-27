@@ -141,8 +141,15 @@ bad_value() {
     || bad_value DOCKER_SOCKET "$DOCKER_SOCKET"
 
 # ── Latest remote SHA ────────────────────────────────────────────────────────
-# The `sha` media type returns the bare commit SHA as plain text, so resolving a
-# ref needs neither `gh` nor `jq` — just curl. Public repo, so no auth either.
+# git ls-remote asks the git server, which has no rate limit. The GitHub API
+# allows 60 calls an hour without a token, and that limit is per IP address:
+# every project on this host and every device behind the same NAT share it.
+# Thus the API is only the fallback for a host without git.
+#
+# Both paths set REMOTE_SHA, or set FETCH_ERROR to the cause. They run in this
+# shell and not in a $(…) subshell, so that the cause reaches the error message.
+FETCH_ERROR=""
+
 api_url() {
     case "$TEMPLATE_REPO" in
         https://github.com/*) echo "https://api.github.com/repos/${TEMPLATE_REPO#https://github.com/}" ;;
@@ -150,11 +157,107 @@ api_url() {
     esac
 }
 
-fetch_remote_sha() {
-    local api
-    api="$(api_url)" || return 1
-    curl -fsSL -m 5 -H 'Accept: application/vnd.github.sha' \
-        "$api/commits/$TEMPLATE_REF" 2>/dev/null | cut -c1-7
+# A token raises the API limit to 5000 calls an hour. GITHUB_TOKEN comes first,
+# then the login of the gh CLI. Without a token, the call is anonymous.
+github_token() {
+    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+        echo "$GITHUB_TOKEN"
+    elif command -v gh >/dev/null 2>&1; then
+        gh auth token 2>/dev/null || true
+    fi
+}
+
+# BSD date (macOS) takes -r, GNU date takes -d.
+format_epoch() {
+    date -r "$1" '+%H:%M %Z' 2>/dev/null || date -d "@$1" '+%H:%M %Z' 2>/dev/null || echo "epoch $1"
+}
+
+# macOS has no timeout(1), and git ls-remote has no time limit of its own.
+# start.sh runs --check on each start, and a bad network must not hold it.
+# The watchdog writes to /dev/null: on the stdout of a $(…), it keeps the
+# substitution open until the sleep ends. It also stops the children of the
+# command. git ls-remote starts git-remote-https, which keeps the stdout open
+# after its parent stops.
+with_timeout() {
+    local secs="$1" pid watchdog rc=0
+    shift
+    "$@" & pid=$!
+    ( sleep "$secs"; pkill -P "$pid"; kill "$pid" ) >/dev/null 2>&1 & watchdog=$!
+    wait "$pid" || rc=$?
+    kill "$watchdog" 2>/dev/null || true
+    return "$rc"
+}
+
+resolve_with_git() {
+    local refs
+    # No terminal prompt: for a repository that does not exist, GitHub asks for
+    # credentials, and start.sh must not stop on that question.
+    if ! refs="$(GIT_TERMINAL_PROMPT=0 with_timeout 10 git ls-remote "$TEMPLATE_REPO" "$TEMPLATE_REF" "$TEMPLATE_REF^{}" 2>&1)"; then
+        if [[ -n "$refs" ]]; then
+            FETCH_ERROR="git ls-remote failed: $(tail -1 <<<"$refs")"
+        else
+            FETCH_ERROR="git ls-remote got no answer in 10 seconds. Check your network."
+        fi
+        return 1
+    fi
+    # A pattern matches the end of a ref name, so 'main' also matches
+    # refs/heads/x/main. Take the exact branch first, then the commit of an
+    # annotated tag (^{}), then a lightweight tag.
+    REMOTE_SHA="$(awk -v b="refs/heads/$TEMPLATE_REF" -v t="refs/tags/$TEMPLATE_REF" '
+        $2 == b       { s[1] = $1 }
+        $2 == t "^{}" { s[2] = $1 }
+        $2 == t       { s[3] = $1 }
+        END { for (i = 1; i <= 3; i++) if (s[i] != "") { print substr(s[i], 1, 7); exit } }
+    ' <<<"$refs")"
+    [[ -n "$REMOTE_SHA" ]] || { FETCH_ERROR="$TEMPLATE_REPO has no branch or tag '$TEMPLATE_REF'."; return 1; }
+}
+
+resolve_with_api() {
+    local api tmp status token remaining reset
+    api="$(api_url)" || { FETCH_ERROR="git is not installed, and $TEMPLATE_REPO is not on GitHub."; return 1; }
+    tmp="$(mktemp -d)"
+    token="$(github_token)"
+    # The token goes to curl on stdin. On the command line, ps shows it.
+    status="$( { [[ -n "$token" ]] && printf 'Authorization: Bearer %s\n' "$token"; true; } \
+        | curl -sS -m 5 -H @- -H 'Accept: application/vnd.github.sha' \
+            -D "$tmp/headers" -o "$tmp/body" -w '%{http_code}' \
+            "$api/commits/$TEMPLATE_REF" 2>"$tmp/err" )" || true
+    header() { tr -d '\r' <"$tmp/headers" | awk -F': *' -v h="$1" 'tolower($1) == h { v = $2 } END { print v }'; }
+    case "$status" in
+        200)
+            REMOTE_SHA="$(head -c 7 "$tmp/body")" ;;
+        401)
+            FETCH_ERROR="The GitHub API refused the token (HTTP 401). Examine GITHUB_TOKEN, or run 'gh auth status'." ;;
+        403|429)
+            remaining="$(header x-ratelimit-remaining)"
+            reset="$(header x-ratelimit-reset)"
+            if [[ "$remaining" == "0" && "$reset" =~ ^[0-9]+$ ]]; then
+                FETCH_ERROR="The GitHub API rate limit for this IP address is used up. It resets at $(format_epoch "$reset"). Set GITHUB_TOKEN or log in with 'gh auth login' to get a higher limit."
+            else
+                FETCH_ERROR="The GitHub API refused the request with HTTP $status."
+            fi ;;
+        000|"")
+            FETCH_ERROR="Cannot reach api.github.com: $(tail -1 "$tmp/err"). Check your network." ;;
+        *)
+            FETCH_ERROR="The GitHub API answered HTTP $status for ref '$TEMPLATE_REF'." ;;
+    esac
+    rm -rf "$tmp"
+    [[ -n "$REMOTE_SHA" ]]
+}
+
+resolve_remote_sha() {
+    # ls-remote finds branch and tag names only. A --ref that is a commit SHA is
+    # already the answer.
+    if [[ "$TEMPLATE_REF" =~ ^[0-9a-f]{7,40}$ ]]; then
+        REMOTE_SHA="${TEMPLATE_REF:0:7}"
+    elif command -v git >/dev/null 2>&1; then
+        resolve_with_git
+    else
+        resolve_with_api
+    fi || return 1
+    # The SHA goes into the download URL of install.sh, so it must be a SHA.
+    [[ "$REMOTE_SHA" =~ ^[0-9a-f]{7}$ ]] \
+        || { FETCH_ERROR="The answer is not a commit SHA: '$REMOTE_SHA'."; REMOTE_SHA=""; return 1; }
 }
 
 # The cache exists so that --check on every start.sh is free. Only --check may read
@@ -167,7 +270,7 @@ REMOTE_SHA=""
 if [[ $CHECK_ONLY -eq 1 && -z "$REF_OVERRIDE" && -n "$(find "$CACHE" -mmin "-$CACHE_MAX_AGE_MIN" 2>/dev/null)" ]]; then
     REMOTE_SHA="$(cat "$CACHE" 2>/dev/null || true)"
 else
-    REMOTE_SHA="$(fetch_remote_sha || true)"
+    resolve_remote_sha || true
     # An explicit ref is not what the cache tracks, so it neither fills nor reads it.
     if [[ -z "$REF_OVERRIDE" ]]; then
         if [[ -n "$REMOTE_SHA" ]]; then
@@ -180,7 +283,8 @@ fi
 
 if [[ -z "$REMOTE_SHA" ]]; then
     [[ $CHECK_ONLY -eq 1 ]] && exit 0   # stay silent inside start.sh
-    echo "ERROR: could not resolve $TEMPLATE_REPO ref '$TEMPLATE_REF'. Check your network." >&2
+    echo "ERROR: could not resolve $TEMPLATE_REPO ref '$TEMPLATE_REF'." >&2
+    echo "       $FETCH_ERROR" >&2
     exit 1
 fi
 

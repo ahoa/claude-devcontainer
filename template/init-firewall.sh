@@ -30,18 +30,41 @@ add_cidrs() {
     done
 }
 
-fetch_json() {
-    local url="$1"
-    local label="$2"
-    local result
-    # -f so an HTTP error page is not mistaken for a body, -m so a hung request
-    # cannot hold the setup open for ever. The caller reports an empty result.
-    result=$(curl -fsS -m 10 "$url" || true)
-    if [ -z "$result" ]; then
-        echo "ERROR: Failed to fetch $label from $url"
-        exit 1
+# The GitHub API allows 60 calls an hour per IP address without a token. Every
+# project and every device behind the same NAT share that limit, and this
+# script runs on each container start. A token raises the limit to 5000.
+# The token is the optional file that git push in the container also reads,
+# see Pushing from the container in the README. Without the file, the call is
+# anonymous.
+GH_TOKEN_FILE=/run/secrets/gh_token
+
+# Fetches one GitHub API URL. On an error, it gives the HTTP status, and for a
+# used-up rate limit also the reset time, instead of a generic failure.
+fetch_github_json() {
+    local url="$1" label="$2" tmp status token="" remaining reset
+    tmp=$(mktemp -d)
+    [[ -r "$GH_TOKEN_FILE" ]] && token=$(head -1 "$GH_TOKEN_FILE" | tr -d '[:space:]')
+    # The token goes to curl on stdin. On the command line, ps shows it.
+    status=$( { [[ -n "$token" ]] && printf 'Authorization: Bearer %s\n' "$token"; true; } \
+        | curl -sS -m 10 -H @- -D "$tmp/headers" -o "$tmp/body" -w '%{http_code}' "$url" 2>"$tmp/err" ) || true
+    if [[ "$status" == "200" ]]; then
+        cat "$tmp/body"
+        rm -rf "$tmp"
+        return 0
     fi
-    echo "$result"
+    remaining=$(tr -d '\r' 2>/dev/null <"$tmp/headers" | awk -F': *' 'tolower($1) == "x-ratelimit-remaining" { v = $2 } END { print v }')
+    reset=$(tr -d '\r' 2>/dev/null <"$tmp/headers" | awk -F': *' 'tolower($1) == "x-ratelimit-reset" { v = $2 } END { print v }')
+    echo "ERROR: Failed to fetch $label from $url (HTTP ${status:-000})" >&2
+    if [[ "$status" =~ ^(403|429)$ && "$remaining" == "0" && "$reset" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: The GitHub API rate limit for this IP address is used up. It resets at $(date -d "@$reset" '+%H:%M %Z')." >&2
+        [[ -n "$token" ]] || echo "ERROR: Put a GitHub token in .devcontainer/.gh_token to get a higher limit. The README section Pushing from the container tells how." >&2
+    elif [[ "$status" == "401" ]]; then
+        echo "ERROR: The GitHub API refused the token in $GH_TOKEN_FILE." >&2
+    elif [[ -s "$tmp/err" ]]; then
+        echo "ERROR: $(tail -1 "$tmp/err")" >&2
+    fi
+    rm -rf "$tmp"
+    exit 1
 }
 
 # Resolve the hosts from two config files and add their addresses to the ipset:
@@ -239,7 +262,7 @@ ipset create allowed-domains hash:net maxelem 65536
 
 # Fetch and add GitHub IP ranges
 echo "Fetching GitHub IP ranges..."
-gh_ranges=$(fetch_json "https://api.github.com/meta" "GitHub IP ranges")
+gh_ranges=$(fetch_github_json "https://api.github.com/meta" "GitHub IP ranges")
 
 if ! echo "$gh_ranges" | jq -e '.web and .api and .git' >/dev/null; then
     echo "ERROR: GitHub API response missing required fields"
@@ -332,8 +355,10 @@ else
     echo "Firewall verification passed - unable to reach https://example.com as expected"
 fi
 
-# Verify GitHub API access
-if ! curl --connect-timeout 5 -m 10 https://api.github.com/zen >/dev/null 2>&1; then
+# Verify GitHub API access. Any HTTP answer proves that the firewall lets the
+# traffic through, so curl has no -f. /rate_limit does not count against the
+# rate limit, but /zen did, on each container start.
+if ! curl --connect-timeout 5 -m 10 https://api.github.com/rate_limit >/dev/null 2>&1; then
     echo "ERROR: Firewall verification failed - unable to reach https://api.github.com"
     exit 1
 else
