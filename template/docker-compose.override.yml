@@ -41,7 +41,7 @@
 # network namespace with `network_mode: "service:devcontainer"` instead of
 # forwarding ports. It then listens on the devcontainer's own loopback.
 #
-# A secret for the unattended loop (loop.sh) goes in a compose secret, not in an
+# A secret for a push from the container goes in a compose secret, not in an
 # `environment:` line and not in `env_file`. A compose secret arrives as a file
 # at /run/secrets/<name>, so the token never enters the container's environment.
 # It is absent from `docker inspect`, absent from the merged config that start.sh

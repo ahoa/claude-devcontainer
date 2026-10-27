@@ -58,12 +58,6 @@ cd /path/to/your/project
 TMUX_WINDOWS=3 ./.devcontainer/start.sh   # override the window count for one run
 ```
 
-```sh
-./.devcontainer/loop.sh                 # one loop run, MAX_STORIES=5, in tmux session "loop"
-MAX_STORIES=1 ./.devcontainer/loop.sh   # first run: one story
-./.devcontainer/loop.sh --attach        # watch the live loop session
-```
-
 The image has two parts. The base image `claude-devbase:<hash>` holds everything
 that is the same in every project: the system packages, Node, Java, Playwright,
 osv-scanner, Codex and the common-utils, claude and github-cli features. Its tag
@@ -119,117 +113,33 @@ with `docker image rm <name>-devcontainer`.
 
 ## Loop
 
-`loop.sh` runs a night's work without you. It brings the container up, then
-starts the ca plugin's loop runner —
-[`hooks/lib/loop-runner.sh`](https://github.com/codeborne/claude-agents) in
-`claude-agents` — detached in the tmux session `loop`. The runner takes stories
-from Feature Manager and works through them with `/ca:develop`, up to
-`MAX_STORIES` of them. What a run does is the plugin's business; this template
-only starts it, in the container, with the environment it expects. The two sides
-meet at one path and a handful of variables, the same way `ca-plugin-flag.sh`
-already works.
+The night loop runs on the host, not in this container. `ca-loop`, a script of
+the ca plugin, runs one story per tick on the host, in a sandbox of its own and
+with a settings file that lists what a tick may run. `ca-loop service install`
+puts it on launchd or systemd there. The steps are in the README of
+[claude-agents](https://github.com/codeborne/claude-agents), section Loop.
 
-`loop.sh` never rebuilds. If the build inputs have moved since the last
-`start.sh` it stops with `build inputs changed, run ./start.sh first`, because a
-rebuild is minutes of network and a chance to fail, and a failure at 22:00 leaves
-no container and no session to find out from. It also stops when the host has no
-ca plugin, and when the installed plugin version has no `loop-runner.sh` in it.
-A second run while the first is still going prints `loop already running` and
-exits 0, so a timer that fires early cannot put two Claudes on one working tree.
+Earlier versions of this template shipped `loop.sh`, which started a loop runner
+inside the container. The plugin has no such runner any more, and `install.sh`
+removes the file from a project on the next update.
 
-The run's output goes to `.loop-state/loop.log` in the repo and to the tmux
-session at the same time; `loop.sh --attach` shows the live session. Put both
-`.loop-state/` and `.gh_token` in the project's `.gitignore`.
+Two rules for a project that is developed in this container:
 
-### A systemd user timer
+- Give the loop a clone of its own. `node_modules` of this checkout is
+  bind-mounted into the container, and its native binaries are the container's,
+  not the host's.
+- The test, build and E2E commands of the project must run on the host.
+  `ca-loop check` shows the ones that do not. A runner that reaches its test
+  stack by container name over the devcontainer's network runs nowhere else.
 
-The trigger is a **user-level** unit. Two files, for a project checked out at
-`~/src/<name>`:
-
-```ini
-# ~/.config/systemd/user/ca-loop@.service
-[Unit]
-Description=ca loop %i
-
-[Service]
-Type=oneshot
-WorkingDirectory=%h/src/%i
-ExecStartPre=/usr/bin/docker info
-ExecStart=%h/src/%i/.devcontainer/loop.sh
-Environment=MAX_STORIES=5
-```
-
-```ini
-# ~/.config/systemd/user/ca-loop@.timer
-[Unit]
-Description=ca loop %i, nightly
-
-[Timer]
-OnCalendar=*-*-* 22:00:00
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
-
-```sh
-loginctl enable-linger <user>          # once: user units run with nobody logged in
-sudo usermod -aG docker <user>         # once: the unit talks to the Docker daemon
-systemctl --user daemon-reload
-systemctl --user enable --now ca-loop@<name>.timer
-systemctl --user start ca-loop@<name>.service   # try it now
-```
-
-**The unit must be user-level.** A system-level unit has no `HOME`, and
-`docker-compose.yml` takes the ca plugin's mount path from `${HOME}`. Empty, that
-mount is the container's root directory over the plugin path — the plugin is not
-there, and `loop.sh` refuses to start. The message points at the host's plugin
-install, which is not where the problem is, so this one is worth avoiding rather
-than debugging.
-
-`Type=oneshot` is right even though a run takes hours: the work happens in tmux
-inside the container, and `loop.sh` returns as soon as the session is started.
-The journal therefore shows the start and nothing else. `loop.sh --attach` shows
-the work, `.loop-state/loop.log` shows what it did.
-
-`ExecStartPre=/usr/bin/docker info` keeps a boot-time firing from starting before
-the daemon is up: the unit fails cleanly instead of leaving a half-started
-container behind.
-
-`loop.sh` makes the same check inside the container, as `dev`, before it starts
-the run. With `--docker on` the socket reaches `dev` through a socat proxy that
-the `docker-outside-of-docker` feature starts, and nothing supervises that proxy.
-The check starts it again when it is gone. When Docker still does not answer,
-`loop.sh` refuses, because every story of the night would otherwise stop at the
-same place, in E2E. `start.sh` and `attach.sh` run the same check and only warn.
-
-Several projects on one host each get their own timer instance with its own
-`OnCalendar` — they share one Docker daemon and one CPU, and two Claudes
-building at once is slower than either alone. Install those projects with
-`--login project` rather than `shared`: an unattended container that can read
-every other project's token is a larger blast radius than a shared login is
-worth.
-
-### Before the first night
-
-1. `./start.sh` on the loop host, over SSH. Then `/login` in the Claude that
-   comes up, connect the Feature Manager MCP server, and detach with `Ctrl-a d`.
-   Both live in the config volume, so this is once per host, not once per night —
-   the volume survives rebuilds.
-2. The ca plugin on the host: `claude plugin install claude-agents@codeborne`.
-   The host owns the version; the container mounts it read-only.
-3. A token for pushing, and the compose secret that carries it — below.
-4. `MAX_STORIES=1 ./.devcontainer/loop.sh`, and watch one story go through with
-   `--attach` before you let a timer do it.
-
-### Pushing from the container
+## Pushing from the container
 
 The container has no SSH key, no forwarded agent, and `gh` is not logged in, so
 nothing in there can push until you give it a credential. The firewall is not the
 obstacle: GitHub's address ranges go into the allowed set whole, and the rule
 that accepts them matches every port, SSH included. There is simply no key.
 
-Give the loop a token instead:
+Give the container a token instead:
 
 1. A fine-grained PAT scoped to this one repository, `contents: write`.
 2. `.devcontainer/.gh_token`, mode `600`, holding the token and nothing else,
@@ -254,8 +164,8 @@ They are environment rather than `git config` because `/home/dev` is not a
 volume: a `~/.gitconfig` written in the container dies with the next rebuild.
 
 Both the file and those variables reach `devcontainer exec`, and through it the
-loop's tmux session, which is how the runner pushes. `gh` stays logged out: a
-push needs git and the helper, not `gh`.
+tmux session of `start.sh`, which is how a push from the container works. `gh`
+stays logged out: a push needs git and the helper, not `gh`.
 
 ## Configuration
 
@@ -398,7 +308,6 @@ CLAUDE_DEVCONTAINER_REPO=https://github.com/you/your-fork ./install.sh --name my
 | `.devcontainer/.build-hash` | Next `start.sh` does a clean rebuild. Gitignored. |
 | `.devcontainer/.update-check` | Next update check fetches the remote SHA instead of the day-old cache. Gitignored. |
 | The login volume (`claude-shared`, or `<name>_claude`) | Discards the Claude login it holds. |
-| `.loop-state/` in the repo root | Discards the loop's log. Created by `loop.sh`, filled by the runner. Gitignore it yourself — the template's `.gitignore` covers `.devcontainer/` only. |
 
 ## Updating
 

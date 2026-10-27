@@ -86,9 +86,8 @@ fi
 # inputs ourselves and pass `--remove-existing-container` whenever they differ
 # from the last successful run (or on first run, when no marker exists).
 #
-# The list of inputs and the hashing both live in .template/build-hash.sh, because
-# loop.sh asks the same question and has to get the same answer: it refuses to run
-# when the hash has moved, rather than rebuilding unattended.
+# The list of inputs and the hashing both live in .template/build-hash.sh, so
+# that every caller of the question gets the same answer.
 BUILD_HASH="$("$TEMPLATE_DIR/build-hash.sh")"
 HASH_FILE="$SCRIPT_DIR/.build-hash"
 
@@ -237,7 +236,7 @@ echo "$BUILD_HASH" > "$HASH_FILE"
 
 # Can dev reach the host Docker daemon? A warning, not a stop: a session without
 # Docker still has uses, and the check starts a dead socket proxy again by
-# itself. loop.sh refuses on the same check, with nobody there to read a warning.
+# itself.
 "$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" --config "$TEMPLATE_DIR/devcontainer.json" \
     .devcontainer/.template/docker-check.sh || true
 

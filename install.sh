@@ -64,7 +64,6 @@ HIDDEN_FILES=(
 VISIBLE_TEMPLATE_FILES=(
     start.sh
     attach.sh
-    loop.sh
     update.sh
     update-fw.sh
 )
@@ -84,7 +83,7 @@ USER_FILES=(
 # All files the template must provide (used to detect a complete template dir).
 TEMPLATE_FILES=("${MACHINERY_FILES[@]}" "${USER_FILES[@]}")
 # Files that get the executable bit, as installed paths.
-EXECUTABLE_FILES=(start.sh attach.sh loop.sh update.sh update-fw.sh .template/init-firewall.sh .template/fw-watch.sh .template/docker-check.sh .template/build-hash.sh tools.sh)
+EXECUTABLE_FILES=(start.sh attach.sh update.sh update-fw.sh .template/init-firewall.sh .template/fw-watch.sh .template/docker-check.sh .template/build-hash.sh tools.sh)
 # Where the hidden machinery goes, relative to .devcontainer/.
 TEMPLATE_SUBDIR=".template"
 # What the devcontainer's compose project name adds to the project name. The
@@ -268,7 +267,7 @@ write_template_files
 # Only once the hidden copies are in place, so a failure above leaves the old
 # layout intact rather than a half-installed one.
 clean_stale_machinery
-
+clean_retired_files
 finish_template_files
 write_stamp
 

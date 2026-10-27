@@ -59,6 +59,20 @@ clean_stale_machinery() {
     echo "→ Moved ${stale[*]} into $TEMPLATE_SUBDIR/ (they are template-owned)"
 }
 
+# Remove the files that a later template no longer ships. loop.sh started a
+# loop runner inside the container. The ca plugin has no such runner since the
+# loop moved to the host (ca-loop), so the file would start nothing.
+RETIRED_FILES=(loop.sh)
+clean_retired_files() {
+    local f gone=()
+    for f in "${RETIRED_FILES[@]}"; do
+        [[ -f "$DEST/$f" ]] && gone+=("$f")
+    done
+    [[ ${#gone[@]} -gt 0 ]] || return 0
+    rm -f "${gone[@]/#/$DEST/}"
+    echo "→ Removed ${gone[*]}: the template no longer ships it"
+}
+
 # Migrate a pre-shared-login install: older versions of this template gave
 # every project its own <project>_claude volume (and thus its own /login).
 # When such a volume exists, seed the shared claude-shared volume from it so

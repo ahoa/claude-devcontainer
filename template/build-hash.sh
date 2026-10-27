@@ -15,10 +15,9 @@
 # stale image. So the inputs are hashed here and the last successful build's hash
 # is kept in .build-hash beside this directory.
 #
-# Two callers, two answers to a changed hash. start.sh rebuilds: it is what you
-# run, and you are there to watch it. loop.sh refuses (--check) and tells you to
-# run start.sh: it runs at night with nobody watching, and a rebuild that fails
-# there leaves no container and no session to find out from.
+# start.sh rebuilds when the hash moved: it is what you run, and you are there
+# to watch it. --check answers the same question without a rebuild, for a caller
+# that must not build with nobody watching.
 set -euo pipefail
 
 TEMPLATE_DIR="$(cd "$(dirname "$0")" && pwd)"

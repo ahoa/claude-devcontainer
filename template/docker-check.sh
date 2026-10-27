@@ -14,8 +14,7 @@
 # Docker, in the middle of an E2E run for example.
 #
 # start.sh and attach.sh run this and go on when it fails: a session without
-# Docker still has uses. loop.sh refuses instead, because every story of a
-# night's run would stop at the same place.
+# Docker still has uses.
 #
 #   exit 0   Docker answers, or this install has no Docker (--docker off)
 #   exit 1   Docker does not answer, and stderr says why
