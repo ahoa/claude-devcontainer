@@ -76,10 +76,14 @@ fi
 "$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" --config "$TEMPLATE_DIR/devcontainer.json" \
     .devcontainer/.template/docker-check.sh || true
 
-# The ca plugin: the flag comes from the host, where the plugin is installed.
-# tmux starts Claude through a non-interactive zsh, which does not read
-# ~/.zshrc, so the claude() function there never reaches this session.
-CA_FLAG="$(bash "$TEMPLATE_DIR/ca-plugin-flag.sh")"
+# The ca plugin: the container's own install, or else the host plugin through
+# the flag, see start.sh.
+if "$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" --config "$TEMPLATE_DIR/devcontainer.json" \
+    .devcontainer/.template/ca-plugin.sh installed >/dev/null 2>&1; then
+    CA_FLAG=""
+else
+    CA_FLAG="$(bash "$TEMPLATE_DIR/ca-plugin-flag.sh")"
+fi
 
 # Re-attach to (or create) the tmux session running Claude. If the session is
 # already live this attaches to it as-is — so it picks up exactly where a

@@ -225,10 +225,16 @@ if NETWORKS_JSON="$(docker compose -f "$TEMPLATE_DIR/docker-compose.yml" -f "$SC
         }' <<<"$NETWORKS_JSON")
 fi
 
+# The GitHub token for the ca plugin, see ca-plugin-token.sh. It goes to `up`
+# only, not to the environment of this script. docker-compose.yml needs the
+# variable set, also when it is empty.
+CA_PLUGIN_TOKEN="$(bash "$TEMPLATE_DIR/ca-plugin-token.sh")"
+
 # `devcontainer up` builds the image, starts the compose stack, applies the
 # features declared in devcontainer.json, and runs the postStartCommand
 # (firewall init).
-"$DEVCONTAINER_BIN" "${UP_ARGS[@]}"
+CA_PLUGIN_TOKEN="$CA_PLUGIN_TOKEN" "$DEVCONTAINER_BIN" "${UP_ARGS[@]}"
+unset CA_PLUGIN_TOKEN
 
 # Record the inputs we just built from, so the next run can detect changes.
 # Only reached on a successful `up` (set -e aborts earlier on failure).
@@ -240,10 +246,19 @@ echo "$BUILD_HASH" > "$HASH_FILE"
 "$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" --config "$TEMPLATE_DIR/devcontainer.json" \
     .devcontainer/.template/docker-check.sh || true
 
-# The ca plugin: the flag comes from the host, where the plugin is installed.
-# tmux starts Claude through a non-interactive zsh, which does not read
-# ~/.zshrc, so the claude() function there never reaches this session.
-CA_FLAG="$(bash "$TEMPLATE_DIR/ca-plugin-flag.sh")"
+# The ca plugin. With a token, the container installs it as a plugin of its own,
+# which then updates itself (ca-plugin.sh). Without one, the flag loads the
+# read-only host plugin. Never both: the plugin then loads twice. tmux starts
+# Claude through a non-interactive zsh, which does not read ~/.zshrc, so the
+# claude() function there never reaches this session.
+"$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" --config "$TEMPLATE_DIR/devcontainer.json" \
+    .devcontainer/.template/ca-plugin.sh install || true
+if "$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" --config "$TEMPLATE_DIR/devcontainer.json" \
+    .devcontainer/.template/ca-plugin.sh installed >/dev/null 2>&1; then
+    CA_FLAG=""
+else
+    CA_FLAG="$(bash "$TEMPLATE_DIR/ca-plugin-flag.sh")"
+fi
 
 # Attach to the running dev container as the configured remoteUser (`dev`) and
 # launch Claude inside a tmux session. The session is created on the first run

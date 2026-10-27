@@ -49,6 +49,8 @@ HIDDEN_FILES=(
     docker-check.sh
     tmux.conf
     ca-plugin-flag.sh
+    ca-plugin-token.sh
+    ca-plugin.sh
     ca-claude.zsh
     build-hash.sh
     # The shared base image, which every project from one template version
@@ -83,7 +85,7 @@ USER_FILES=(
 # All files the template must provide (used to detect a complete template dir).
 TEMPLATE_FILES=("${MACHINERY_FILES[@]}" "${USER_FILES[@]}")
 # Files that get the executable bit, as installed paths.
-EXECUTABLE_FILES=(start.sh attach.sh update.sh update-fw.sh .template/init-firewall.sh .template/fw-watch.sh .template/docker-check.sh .template/build-hash.sh tools.sh)
+EXECUTABLE_FILES=(start.sh attach.sh update.sh update-fw.sh .template/init-firewall.sh .template/fw-watch.sh .template/docker-check.sh .template/build-hash.sh .template/ca-plugin.sh tools.sh)
 # Where the hidden machinery goes, relative to .devcontainer/.
 TEMPLATE_SUBDIR=".template"
 # What the devcontainer's compose project name adds to the project name. The

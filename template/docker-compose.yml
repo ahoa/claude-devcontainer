@@ -52,7 +52,19 @@ services:
       # /var/run/docker.sock breaks that proxy: the entrypoint cannot remove a
       # mountpoint, so it stops before socat starts, and dev is left with the
       # host's root-owned socket.
+    # The GitHub token for the private repo of the ca plugin, see ca-plugin.sh.
+    # start.sh reads it on the host and gives it in CA_PLUGIN_TOKEN. Compose
+    # writes it to /run/secrets/ca_plugin_token, so it is not in the container's
+    # environment and not in `docker inspect`. An empty value makes no file.
+    secrets:
+      - ca_plugin_token
     command: sleep infinity
+
+secrets:
+  ca_plugin_token:
+    # The variable must be set, also when it is empty, or `up` stops. start.sh
+    # always sets it.
+    environment: CA_PLUGIN_TOKEN
 
 volumes:
   claude:

@@ -46,6 +46,27 @@ other than the current directory:
 | `CLAUDE_DEVCONTAINER_REPO` | Repo to install and update from, e.g. your own fork |
 | `CLAUDE_DEVCONTAINER_REF` | Branch, tag or commit to install (default `main`) |
 
+### The ca plugin
+
+Claude in the container runs with the
+[claude-agents](https://github.com/codeborne/claude-agents) plugin (`ca`). The
+container gets it in one of two ways:
+
+- **Its own install, which updates itself.** The container installs
+  `claude-agents@codeborne` from the marketplace and updates it through Claude's
+  own mechanism: the update at start, `/plugin` and `claude plugin update`. The
+  repo is private, so this needs a read-only GitHub token. Make it as the
+  claude-agents README tells in its section Devcontainer only, and keep it in
+  1Password. The first `start.sh` asks for its 1Password reference (default
+  `op://Employee/claude-agents-github-token/credential`) and reads it with
+  `op read` on each start. The 1Password CLI (`op`) must be signed in. The
+  container gets the token when it is created, so a new or changed token needs
+  a rebuild: remove `.devcontainer/.build-hash` and run `start.sh`.
+- **The host's install, read-only.** Without a token, the container uses the
+  newest version under `~/.claude/plugins/cache/codeborne/claude-agents/` on the
+  host, and only the host can update it. Install it on the host with
+  `claude plugin install claude-agents@codeborne`.
+
 ## Run
 
 ```sh
@@ -312,6 +333,7 @@ CLAUDE_DEVCONTAINER_REPO=https://github.com/you/your-fork ./install.sh --name my
 | `.devcontainer/.build-hash` | Next `start.sh` does a clean rebuild. Gitignored. |
 | `.devcontainer/.update-check` | Next update check fetches the remote SHA instead of the day-old cache. Gitignored. |
 | The login volume (`claude-shared`, or `<name>_claude`) | Discards the Claude login it holds. |
+| `~/.config/claude-devcontainer/ca-plugin-token-ref` | Next `start.sh` asks for the 1Password reference of the ca plugin token again. On the host, for every project. |
 
 ## Updating
 
@@ -397,20 +419,11 @@ nothing to copy and nothing to remove. Delete the
   parse, could not be started at all. A project needs no Node of its own. A
   project started before this keeps an unused copy in its own `node_modules`;
   the next `npm ci` or `pnpm install` clears it.
-- The `claude` CLI on the host — only on a host that runs the loop, and only as
-  the thing that keeps the plugin cache up to date. Claude itself runs in the
-  container; the host copy never needs a login, and `claude plugin install` works
-  without one. What it does need is git access to `codeborne/claude-agents`,
-  which is private and is cloned over SSH, so the host wants an SSH key that can
-  read it.
-
-Updating the plugin on such a host is `claude plugin update claude-agents@codeborne`
-(or `claude plugin install claude-agents@codeborne` the first time). It adds a
-directory under `~/.claude/plugins/cache/codeborne/claude-agents/`, and the
-container picks the highest version there on the next run — the mount is
-read-only and the host owns the version, so nothing inside the container can
-change it. Worth a cron job of its own, ahead of the loop timer: a run that needs
-a newer runner than the host has stops with `ca plugin too old`.
+- For the ca plugin, one of the two (see Install, The ca plugin): the 1Password
+  CLI `op` and a read-only GitHub token for `codeborne/claude-agents`, or the
+  `claude` CLI on the host with the plugin installed. The host install needs git
+  access to `codeborne/claude-agents` over SSH. With neither, Claude starts
+  without the plugin and `start.sh` says so.
 
 The same install works from macOS and Linux, on x86-64 and arm64. Where the two
 would differ the template handles it: `extra_hosts` gives Linux a
@@ -465,6 +478,27 @@ Install with `--docker off` and mount the real path in
   not change: whoever reaches the Docker socket can `docker exec` and read the
   file anyway, which is the trust boundary the socket already sets. Scope the
   PAT to one repository and give it an expiry.
+- **The ca plugin token is a compose secret too**, at
+  `/run/secrets/ca_plugin_token`. `start.sh` reads it from 1Password on the host
+  and gives it to `devcontainer up` only, so it is never written to a file on the
+  host. Compose writes it into the container when it creates the container, and
+  `docker commit` or an export of the container carries it. Git in the container
+  uses it only for the `codeborne/claude-agents` URL. Use a fine-grained token
+  with read access to that one repo: the agent in the container can read the
+  file.
+- **`start.sh` runs on the host from a directory the container can write.**
+  That was true before, but now `start.sh` also reads 1Password through it. An
+  agent that rewrites `.devcontainer/` scripts gets the host user's 1Password
+  session at the next start. Look at `git status` before you run `start.sh`
+  after an unattended session.
+  The claude-agents README puts the token in `GH_TOKEN` and runs
+  `gh auth setup-git`. This template does not, for the reasons in the bullet
+  above, and because that helper gives the token to every GitHub URL.
+- **The container's ca plugin is not the host's.** The two can have different
+  versions, at different paths. Each Claude session copies the plugin's rules
+  into the project's `.claude/rules/` with its own path, so the rules change each
+  time you change between host and container. Do not run a host session and a
+  container session in one project at the same time.
 - **A loop host is worth more than a laptop.** It holds the Claude login, the
   Feature Manager token, a PAT that can write to the repo, and — unless
   installed with `--docker off` — the Docker socket, which is the host itself.

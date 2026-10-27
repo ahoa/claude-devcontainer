@@ -37,6 +37,18 @@ RUN chmod +x /usr/local/bin/init-firewall.sh && \
     echo "dev ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh" > /etc/sudoers.d/init-firewall && \
     chmod 0440 /etc/sudoers.d/init-firewall
 
+# The git credential for the private repo of the ca plugin, see ca-plugin.sh.
+# It applies to that one repo URL only, so it does not compete with a token that
+# the project gives git for its own repo. The token is a compose secret file, not
+# an environment variable, and the helper gives nothing when the file is absent.
+# --system: /home/dev is not a volume, but the image keeps /etc/gitconfig. Git
+# matches the path of a credential URL segment by segment, so the URL with .git
+# and the URL without it each need a key.
+RUN for url in https://github.com/codeborne/claude-agents.git https://github.com/codeborne/claude-agents; do \
+      git config --system "credential.$url.helper" \
+        '!f() { test "$1" = get && test -s /run/secrets/ca_plugin_token && echo username=x-access-token && echo "password=$(cat /run/secrets/ca_plugin_token)"; }; f'; \
+    done
+
 # Project toolchain — anything beyond Node, Java, Playwright, osv-scanner and Codex. It lives in
 # tools.sh rather than in RUN lines here, because this Dockerfile belongs to the
 # template and is overwritten on update, while tools.sh is yours and is not.
