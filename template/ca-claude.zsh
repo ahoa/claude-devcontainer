@@ -7,8 +7,8 @@
 # directory per version of the read-only host plugin, and --plugin-dir loads the
 # newest one. Never both: the plugin then loads twice.
 claude() {
-  # The same test as `ca-plugin.sh installed`.
-  if grep -q '"claude-agents@codeborne"' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json" 2>/dev/null; then
+  # The Dockerfile copies ca-plugin.sh to /usr/local/bin.
+  if ca-plugin.sh installed 2>/dev/null; then
     command claude --dangerously-skip-permissions "$@"
     return
   fi

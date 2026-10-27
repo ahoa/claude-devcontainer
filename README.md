@@ -65,7 +65,11 @@ container gets it in one of two ways:
 - **The host's install, read-only.** Without a token, the container uses the
   newest version under `~/.claude/plugins/cache/codeborne/claude-agents/` on the
   host, and only the host can update it. Install it on the host with
-  `claude plugin install claude-agents@codeborne`.
+  `claude plugin install claude-agents@codeborne`. A container that already
+  has its own install keeps it when the token is removed, but that install
+  does not update. To use the host plugin again, run
+  `claude plugin uninstall claude-agents@codeborne` in the container. When
+  projects share the claude volume, the uninstall applies to each of them.
 
 ## Run
 

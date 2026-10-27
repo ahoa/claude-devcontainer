@@ -37,6 +37,11 @@ RUN chmod +x /usr/local/bin/init-firewall.sh && \
     echo "dev ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh" > /etc/sudoers.d/init-firewall && \
     chmod 0440 /etc/sudoers.d/init-firewall
 
+# The test for the container's own ca plugin. The claude() function in
+# ~/.zshrc (ca-claude.zsh) runs it from here.
+COPY .template/ca-plugin.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/ca-plugin.sh
+
 # The git credential for the private repo of the ca plugin, see ca-plugin.sh.
 # It applies to that one repo URL only, so it does not compete with a token that
 # the project gives git for its own repo. The token is a compose secret file, not

@@ -8,13 +8,18 @@
 # `devcontainer exec`.
 #
 #   ca-plugin.sh install     install claude-agents@codeborne when the token exists
-#   ca-plugin.sh installed   exit 0 when the plugin is installed, 1 when not
+#   ca-plugin.sh installed   exit 0 when Claude loads the installed plugin here
+#
+# The Dockerfile also copies this script to /usr/local/bin, so the claude()
+# function in ca-claude.zsh makes the same test.
 #
 # An installed plugin updates through Claude's own mechanism: the update at
 # start, /plugin and `claude plugin update`. The read-only host mount cannot do
 # that. Claude loads the mount through --plugin-dir and does not know it as an
 # installed plugin. The mount stays as the fallback for a container without a
-# token.
+# token. An install that exists stays in use without a token. The claude volume
+# can be shared, and another project with a token updates it. Uninstalling it
+# here would take it from that project too.
 #
 # The marketplace repo is private. The token for it is the compose secret
 # ca_plugin_token. The git credential helper in the Dockerfile gives it to git
@@ -26,11 +31,25 @@ MARKETPLACE_NAME="codeborne"
 MARKETPLACE_SOURCE="codeborne/claude-agents"
 TOKEN_FILE=/run/secrets/ca_plugin_token
 PLUGINS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins"
+SETTINGS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
 
-# Read from the file and not from `claude plugin list`: attach.sh asks on each
-# attach, and the file costs no Claude start.
+# Read from the files and not from `claude plugin list`: attach.sh asks on each
+# attach, and the files cost no Claude start. Claude loads an entry of the user
+# scope, or an entry whose projectPath is this workspace. The claude volume can
+# be shared between projects, so an entry for another workspace does not count.
+# An entry whose directory is gone does not count, and neither does a plugin
+# that settings.json disables.
 installed() {
-  grep -q "\"$PLUGIN\"" "$PLUGINS_DIR/installed_plugins.json" 2>/dev/null
+  local workspace dir
+  workspace="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  [[ "$(jq -r --arg p "$PLUGIN" 'if .enabledPlugins[$p] == false then "off" else "on" end' \
+    "$SETTINGS" 2>/dev/null)" != off ]] || return 1
+  while read -r dir; do
+    [[ -n "$dir" && -d "$dir" ]] && return 0
+  done < <(jq -r --arg p "$PLUGIN" --arg ws "$workspace" \
+    '.plugins[$p][]? | select(.scope == "user" or .projectPath == $ws) | .installPath' \
+    "$PLUGINS_DIR/installed_plugins.json" 2>/dev/null)
+  return 1
 }
 
 marketplace_known() {
@@ -38,8 +57,16 @@ marketplace_known() {
 }
 
 install() {
-  # No token: start.sh already said so, and the host mount stays in use.
-  [[ -s "$TOKEN_FILE" ]] || return 0
+  # No token: start.sh already said so. The host mount is in use, unless an
+  # install exists.
+  if [[ ! -s "$TOKEN_FILE" ]]; then
+    if installed; then
+      echo "NOTE: Claude uses the container's own ca plugin. Without a token it does not update." >&2
+      echo "      To use the host plugin again: claude plugin uninstall $PLUGIN" >&2
+      echo "      The claude volume can be shared. The uninstall then applies to each project on it." >&2
+    fi
+    return 0
+  fi
   installed && return 0
 
   echo "==> Installing the ca plugin in the container ($PLUGIN)"
