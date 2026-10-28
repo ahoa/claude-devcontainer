@@ -490,11 +490,15 @@ Install with `--docker off` and mount the real path in
   uses it only for the `codeborne/claude-agents` URL. Use a fine-grained token
   with read access to that one repo: the agent in the container can read the
   file.
-- **`start.sh` runs on the host from a directory the container can write.**
-  That was true before, but now `start.sh` also reads 1Password through it. An
-  agent that rewrites `.devcontainer/` scripts gets the host user's 1Password
-  session at the next start. Look at `git status` before you run `start.sh`
-  after an unattended session.
+- **The container sees `.devcontainer/` read-only.** `start.sh` runs on the
+  host and reads 1Password. `fw-watch.sh` copies an edited `domains.conf` into
+  the firewall. `tools.sh` goes into the image. An agent that can change these
+  files can run code on the host or open the firewall. Thus `docker-compose.yml`
+  mounts `.devcontainer/` a second time, read-only, over the project mount. Edit
+  these files on the host. The rest of the project stays writable, and code
+  from it can still run on the host: `.git/hooks`, `.git/config` and the
+  application itself. Look at `git status` before you run anything after an
+  unattended session.
   The claude-agents README puts the token in `GH_TOKEN` and runs
   `gh auth setup-git`. This template does not, for the reasons in the bullet
   above, and because that helper gives the token to every GitHub URL.
