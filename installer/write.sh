@@ -67,6 +67,7 @@ write_template_files() {
             -e "s|__TIMEZONE__|$TIMEZONE|g" \
             -e "s|__CLAUDE_VOLUME__|$CLAUDE_VOLUME|g" \
             -e "s|__DOCKER_FEATURE__|$DOCKER_FEATURE|g" \
+            -e "s|__SUDO_CLEANUP__|$SUDO_CLEANUP|g" \
             "$PENDING_WRITE"
         rm -f "$PENDING_WRITE.bak"
         mv -f "$PENDING_WRITE" "$dest"

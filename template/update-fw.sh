@@ -9,11 +9,12 @@
 # The firewall resolves each host once, at container start, and its rules match
 # those addresses only. A CDN host answers with other addresses later, so a
 # download can fail hours after the start although its host is in domains.conf.
-# An edited domains.conf does not reach the container at all, because the image
-# was built with a copy of it.
+# A host that an edit adds to domains.conf is not in the set yet either.
 #
-# This fixes both: it copies an edited list in and adds the current addresses to
-# the live set, flushing nothing. The container already does this by itself every
+# This fixes both: it resolves the lists again and adds the current addresses to
+# the live set, flushing nothing. The firewall reads domains.conf from the
+# read-only .devcontainer/ mount, so an edit on the host applies without a
+# rebuild. The container already does this by itself every
 # few minutes — see .template/fw-watch.sh, which devcontainer.json starts — so
 # this is that same tick, on demand, when you would rather not wait for it. The
 # form from a shell inside the container:

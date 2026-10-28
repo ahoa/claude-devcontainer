@@ -44,6 +44,7 @@ HIDDEN_FILES=(
     Dockerfile
     docker-compose.yml
     init-firewall.sh
+    init-firewall-lists.sh
     domains-base.conf
     fw-watch.sh
     docker-check.sh
@@ -112,7 +113,8 @@ Options:
                     project's own). Default shared. Prompted if omitted.
   --docker MODE     'on' gives the container the host Docker socket, through the
                     docker-outside-of-docker feature, which also gives it control
-                    of the host. 'off' leaves the feature out. Default on.
+                    of the host. 'off' leaves the feature out and takes away
+                    dev's passwordless sudo. Default off.
                     Prompted if omitted.
   --force           Overwrite an existing .devcontainer/ and ignore name conflicts.
   -h, --help        Show this help.

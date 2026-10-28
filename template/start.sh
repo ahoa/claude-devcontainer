@@ -159,10 +159,12 @@ fi
 CLAUDE_VOLUME="__CLAUDE_VOLUME__"
 docker volume create "$CLAUDE_VOLUME" >/dev/null
 
-# The login volume is shared, and postStartCommand (devcontainer.json) gives it
-# to this container's `dev` user when another UID owns it. `dev` has UID 1000
-# from base/Dockerfile, and had UID 1001 before. So the first start after that
-# update takes the volume from every project that still runs the old template.
+# The login volume is shared, and this script gives it to this container's `dev`
+# user when another UID owns it. The chown runs here, as root in a throwaway
+# container, because `dev` in the devcontainer may have no sudo for it. `dev`
+# has UID 1000 from base/Dockerfile, and had UID 1001 before. So the first start
+# after that update takes the volume from every project that still runs the old
+# template.
 # Such a project cannot save its Claude login or its sessions until its own
 # update. The probe runs on the host, so the warning comes before the chown. On
 # Linux the CLI gives `dev` the host UID. On macOS it keeps the UID from
@@ -175,8 +177,10 @@ else
     DEV_UID="$(grep -m1 -oE 'useradd --uid [0-9]+' "$TEMPLATE_DIR/base/Dockerfile" | grep -oE '[0-9]+$' || true)"
 fi
 VOLUME_UID="$(docker run --rm --user 0 --entrypoint sh -v "$CLAUDE_VOLUME:/v:ro" "$CLAUDE_DEVBASE_IMAGE" \
+    DEV_GID="$(id -g)"
     -c '[ -n "$(ls -A /v)" ] && stat -c %u /v' 2>/dev/null || true)"
 if [[ -n "$DEV_UID" && -n "$VOLUME_UID" && "$VOLUME_UID" != "$DEV_UID" ]]; then
+    DEV_GID="$(grep -m1 -oE 'groupadd --gid [0-9]+' "$TEMPLATE_DIR/base/Dockerfile" | grep -oE '[0-9]+$' || true)"
     {
         echo "WARNING: the volume '$CLAUDE_VOLUME' belongs to UID $VOLUME_UID, but the 'dev' user in this container is UID $DEV_UID."
         echo "         This start gives the volume to UID $DEV_UID."
@@ -192,6 +196,11 @@ fi
 
 # An external network in docker-compose.override.yml must exist before `up`, or
 # compose stops with "declared as external, but could not be found". Usually the
+    if [[ -n "$DEV_GID" ]]; then
+        docker run --rm --user 0 --entrypoint chown -v "$CLAUDE_VOLUME:/v" "$CLAUDE_DEVBASE_IMAGE" \
+            -R "$DEV_UID:$DEV_GID" /v \
+            || echo "WARNING: could not give the volume '$CLAUDE_VOLUME' to UID $DEV_UID. Claude cannot save its login or its sessions." >&2
+    fi
 # network belongs to the project's own dev stack, and nobody started that stack on
 # a new machine. So create each missing external network here.
 #

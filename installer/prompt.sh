@@ -163,12 +163,12 @@ ask_login() {
 #       second mount on /var/run/docker.sock stops the feature's proxy, and dev
 #       is left with the host's root-owned socket (see docker-compose.yml).
 # off — no docker-outside-of-docker feature. Nothing in the container can reach
-#       Docker.
+#       Docker, and the Dockerfile removes dev's passwordless sudo. The default.
 ask_docker() {
     while :; do
         if [[ -z "$DOCKER_SOCKET" ]]; then
-            prompt_user DOCKER_SOCKET "Mount the host Docker socket? It gives the container control of the host. [on/off, ${EXISTING_DOCKER:-on}]: " || true
-            DOCKER_SOCKET="${DOCKER_SOCKET:-${EXISTING_DOCKER:-on}}"
+            prompt_user DOCKER_SOCKET "Mount the host Docker socket? It gives the container control of the host. [on/off, ${EXISTING_DOCKER:-off}]: " || true
+            DOCKER_SOCKET="${DOCKER_SOCKET:-${EXISTING_DOCKER:-off}}"
         fi
 
         [[ "$DOCKER_SOCKET" == "on" || "$DOCKER_SOCKET" == "off" ]] && break
@@ -183,5 +183,12 @@ ask_docker() {
         DOCKER_FEATURE='"ghcr.io/devcontainers/features/docker-outside-of-docker:1": { "moby": false }'
     else
         DOCKER_FEATURE='// not installed — this project was installed with --docker off'
+    fi
+    # The Dockerfile line that keeps or removes dev's passwordless sudo, see the
+    # comment above the placeholder there.
+    if [[ "$DOCKER_SOCKET" == "on" ]]; then
+        SUDO_CLEANUP='# --docker on: dev keeps passwordless sudo.'
+    else
+        SUDO_CLEANUP='RUN rm -f /etc/sudoers.d/dev; ! grep -rqs "NOPASSWD: *ALL" /etc/sudoers /etc/sudoers.d'
     fi
 }

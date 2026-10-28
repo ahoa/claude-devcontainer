@@ -13,16 +13,15 @@
 #     later, so a download can fail hours in although its host is allowed.
 #   * domains.conf itself. It is COPYed into the image at build time, so an edit
 #     on the host used to reach the container only through a rebuild — which
-#     takes the running session with it. The repo is mounted, though, so the
-#     edited file is right here: copy it over the baked one, and the refresh that
-#     follows resolves the hosts it gained.
+#     takes the running session with it. init-firewall.sh now reads the file in
+#     the read-only .devcontainer/ mount itself, so the refresh below resolves
+#     the hosts an edit added. The agent cannot change that mount.
 #
-# Both steps only add. `init-firewall.sh --refresh` puts addresses into the live
-# ipset and flushes nothing, so a tick cannot take this container's network down
-# the way a failed full re-init could. The price is that a host REMOVED from
-# domains.conf stays allowed until the next ./start.sh, which rebuilds the image
-# (domains.conf is a build input) and applies the list from scratch. A tick that
-# sees a removal says so.
+# The refresh only adds. `init-firewall.sh --refresh` puts addresses into the
+# live ipset and flushes nothing, so a tick cannot take this container's network
+# down the way a failed full re-init could. The price is that a host REMOVED from
+# domains.conf stays allowed until the next ./start.sh, which builds the rules
+# from scratch.
 #
 # Modes:
 #   --start   start the loop in the background, replacing one already running.
@@ -45,16 +44,6 @@ fi
 
 LOG=/tmp/fw-watch.log
 PIDFILE=/tmp/fw-watch.pid
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DEVCONTAINER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-# Each pair is "the file in the mounted repo" and "the copy the image was built
-# with", in the order init-firewall.sh reads them: the template's baseline and
-# the project's own additions.
-CONFS=(
-    "$SCRIPT_DIR/domains-base.conf:/usr/local/bin/domains-base.conf"
-    "$DEVCONTAINER_DIR/domains.conf:/usr/local/bin/domains.conf"
-)
 
 # A one-off run reports what it did; the loop only speaks when something changed,
 # because its log is read when something failed, not to prove it is alive.
@@ -79,49 +68,14 @@ is_watcher() {
     [[ "$cmdline" == *fw-watch.sh* ]]
 }
 
-# The hosts a list names, comments and blank lines removed, for comparing two
-# versions of the same file.
-conf_hosts() {
-    sed 's/#.*//' "$1" | awk '{$1=$1; print}' | grep -v '^$' | sort -u || true
-}
-
-# Copy a changed list over the baked one. Reports whether it changed anything, so
-# the caller knows to speak up about a tick it would otherwise keep quiet.
-sync_conf() {
-    local src="$1" baked="$2" name removed=""
-    name="$(basename "$src")"
-    [[ -f "$src" ]] || return 1
-    # A missing baked copy means the image predates this list; copying it in is
-    # still the right move.
-    if [[ -f "$baked" ]] && cmp -s "$src" "$baked"; then
-        return 1
-    fi
-    if [[ -f "$baked" ]]; then
-        removed="$(comm -23 <(conf_hosts "$baked") <(conf_hosts "$src") | tr '\n' ' ')"
-    fi
-    if ! sudo -n cp "$src" "$baked" 2>/dev/null; then
-        log "WARNING: $name changed but could not be copied to $baked — its new hosts are not allowed"
-        return 1
-    fi
-    log "$name changed — applying it"
-    if [[ -n "${removed// /}" ]]; then
-        log "  no longer listed: ${removed% } — still allowed until ./start.sh rebuilds"
-    fi
-    return 0
-}
-
 tick() {
-    local changed=0 pair out new warnings line
-    for pair in "${CONFS[@]}"; do
-        sync_conf "${pair%%:*}" "${pair#*:}" && changed=1
-    done
-
+    local out new warnings line
     # Never let one bad tick end the watch: a resolver hiccup, or a firewall that
     # is not up yet, has to be survivable or the container spends the rest of the
     # session without a refresh.
     if out="$(sudo -n /usr/local/bin/init-firewall.sh --refresh 2>&1)"; then
         new="$(sed -n 's/^Firewall refresh complete: \([0-9]*\) new.*/\1/p' <<<"$out")"
-        if [[ "${new:-0}" != "0" || $changed -eq 1 || $VERBOSE -eq 1 ]]; then
+        if [[ "${new:-0}" != "0" || $VERBOSE -eq 1 ]]; then
             log "refresh: ${new:-0} new address(es) allowed"
         fi
         # A host that stopped resolving is worth seeing when it starts, and not

@@ -38,7 +38,7 @@ other than the current directory:
 | `--windows N` | tmux windows, each running its own Claude (default `1`) |
 | `--timezone ZONE` | IANA timezone for the container clock (default `Europe/Tallinn`) |
 | `--login MODE` | `shared` (default) — one Claude login for every project from this template — or `project`, a login of this project's own |
-| `--docker MODE` | `on` (default) gives the container the host Docker socket through the `docker-outside-of-docker` feature, which also gives the container control of the host. `off` leaves the feature out, and nothing in the container can reach Docker |
+| `--docker MODE` | `off` (default) leaves the `docker-outside-of-docker` feature out. Nothing in the container can reach Docker, and `dev` has no passwordless sudo. `on` gives the container the host Docker socket through that feature, which also gives the container control of the host |
 | `--force` | Overwrite an existing `.devcontainer/` and reuse conflicting Docker objects |
 
 | Env var | Meaning |
@@ -232,15 +232,19 @@ at the top and is replaced on update. Each of the four is a build input, so
 | `firewall.sh` | `iptables`/`ipset` rules hostnames cannot express. Sourced at container start while the rules are still being built, before the catch-all reject. |
 | `docker-compose.override.yml` | Services, published ports, environment, extra volumes. Merged on top of the template's compose file. |
 
+**The container sees `.devcontainer/` read-only.** Edit these files on the host.
+Claude in the container can read them but cannot change them.
+
 The firewall resolves each host once, at container start, and the rules match
 those addresses only. A CDN host can answer with other addresses later, so a download can fail
-hours after the start although its host is in the list. `domains.conf` is baked
-into the image too, so an edit to it would normally need a rebuild.
+hours after the start although its host is in the list.
 
-The container therefore keeps both current by itself: `.template/fw-watch.sh`
-starts with the container and, every five minutes, copies an edited `domains.conf`
-in and re-resolves every host. It only adds addresses and flushes nothing, so a
-tick cannot take the network down. It stays quiet unless something changed —
+The firewall reads `domains.conf` and `.template/domains-base.conf` from the
+read-only `.devcontainer/` mount, so an edit on the host needs no rebuild. When
+that mount is not read-only, it uses the copies baked into the image.
+`.template/fw-watch.sh` starts with the container and resolves every host again
+every five minutes. It only adds addresses and flushes nothing, so a tick cannot
+take the network down. It stays quiet unless something changed —
 `tail -f /tmp/fw-watch.log` inside the container shows what it did. Set
 `FW_WATCH_INTERVAL` (seconds) in `docker-compose.override.yml` to change the pace.
 
@@ -254,7 +258,6 @@ To apply an edit at once instead of waiting for the next tick:
 A host **removed** from `domains.conf` is the one change this cannot apply: a
 refresh never takes an address out of the live set. Removals take effect on the
 next `./start.sh`, which rebuilds the image and builds the rules from scratch.
-The tick says so in the log when it sees one.
 
 Nothing needs configuring to reach the host — it is at `host.docker.internal:PORT`,
 which the firewall allows — or to reach a sibling compose service, which resolves
@@ -440,16 +443,23 @@ Install with `--docker off` and mount the real path in
 
 ## Notes
 
-- **The sandbox is not a security boundary against a hostile toolchain.** The
-  container has `NET_ADMIN`/`NET_RAW`, and the `common-utils` feature gives `dev`
-  passwordless root in it, so code running in there can flush the firewall. Read
-  the firewall as a guardrail against a mistake, a stray command or an injected
-  instruction, not as a wall that holds against a determined attacker.
+- **With `--docker off`, the firewall is a boundary.** The `common-utils`
+  feature gives `dev` passwordless root, and the project's Dockerfile removes it.
+  `dev` then gets root only through `sudo /usr/local/bin/init-firewall.sh`, with
+  or without `--refresh`. That script reads only root-owned files and the
+  read-only `.devcontainer/` mount. A full run opens the policies while it
+  builds the rules. Thus, when the firewall is up, a run without `--refresh`
+  only refreshes. The container has `NET_ADMIN`/`NET_RAW`, but
+  a process without root cannot use them, so it cannot flush the rules.
+- **With `--docker on`, the firewall is only a guardrail.** `dev` keeps
+  passwordless root, because the `docker-outside-of-docker` entrypoint uses sudo
+  to start its socket proxy again. The socket gives root on the host anyway.
+  Read the firewall as a guardrail against a mistake, a stray command or an
+  injected instruction, not as a wall that holds against a determined attacker.
 - **The host Docker socket is the loosest part of it, and it is optional.** A
   container that reaches that socket can start a privileged one, so mounting it
-  hands over the host. `--docker on` is the default because tests that start their
-  own containers need it. Answer `off` for a project that does not, and nothing in
-  the container can reach Docker. A project that needs the socket at a different
+  hands over the host. `--docker off` is the default. Answer `on` only for a
+  project whose tests start their own containers. A project that needs the socket at a different
   path (rootless Docker) mounts it in `docker-compose.override.yml`. The socket
   also reaches the shared base image `claude-devbase:<hash>`. A container with the
   socket can put another image under that tag, and every project on the machine,
@@ -491,14 +501,13 @@ Install with `--docker off` and mount the real path in
   with read access to that one repo: the agent in the container can read the
   file.
 - **The container sees `.devcontainer/` read-only.** `start.sh` runs on the
-  host and reads 1Password. `fw-watch.sh` copies an edited `domains.conf` into
-  the firewall. `tools.sh` goes into the image. An agent that can change these
+  host and reads 1Password. The firewall reads `domains.conf` from the mount as
+  root. `tools.sh` goes into the image. An agent that can change these
   files can run code on the host or open the firewall. Thus `docker-compose.yml`
   mounts `.devcontainer/` a second time, read-only, over the project mount. Edit
   these files on the host. The rest of the project stays writable, and code
   from it can still run on the host: `.git/hooks`, `.git/config` and the
-  application itself. Look at `git status` before you run anything after an
-  unattended session.
+  application itself.
   The claude-agents README puts the token in `GH_TOKEN` and runs
   `gh auth setup-git`. This template does not, for the reasons in the bullet
   above, and because that helper gives the token to every GitHub URL.

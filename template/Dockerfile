@@ -29,13 +29,23 @@ RUN ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" > /etc/timezo
 # Firewall script, its two host lists (the template's baseline and the project's
 # own additions) and the project's own extra rules. Build-time has full network; the firewall only applies at
 # container runtime via postStartCommand.
-COPY .template/init-firewall.sh /usr/local/bin/
+COPY .template/init-firewall.sh .template/init-firewall-lists.sh /usr/local/bin/
 COPY .template/domains-base.conf /usr/local/bin/
 COPY domains.conf /usr/local/bin/
 COPY firewall.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/init-firewall.sh && \
     echo "dev ALL=(root) NOPASSWD: /usr/local/bin/init-firewall.sh" > /etc/sudoers.d/init-firewall && \
     chmod 0440 /etc/sudoers.d/init-firewall
+
+# The common-utils feature in the base gives dev passwordless root through
+# /etc/sudoers.d/dev. The installer substitutes the line below. With --docker off
+# it removes that file, and the entry above is then dev's only way to root. With
+# --docker on the file stays: the docker-outside-of-docker entrypoint takes sudo
+# when docker-check.sh starts its socket proxy again, and the socket gives root on
+# the host anyway. With --docker off the build also fails when another
+# NOPASSWD: ALL grant is left, for example one a base feature wrote under another
+# file name.
+__SUDO_CLEANUP__
 
 # The test for the container's own ca plugin. The claude() function in
 # ~/.zshrc (ca-claude.zsh) runs it from here.

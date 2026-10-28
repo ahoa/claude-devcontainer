@@ -36,8 +36,8 @@ services:
       - ../..:/workspace/__PROJECT_NAME__:cached
       # .devcontainer/ again, read-only, over the mount above. start.sh,
       # update.sh and the other scripts here run on the host, start.sh with the
-      # user's 1Password session. fw-watch.sh copies an edited domains.conf into
-      # the firewall, and tools.sh goes into the image. The agent must not
+      # user's 1Password session. The firewall reads domains.conf from here as
+      # root, and tools.sh goes into the image. The agent must not
       # change any of them. The scripts in the container only read this
       # directory. Edit it on the host.
       - ..:/workspace/__PROJECT_NAME__/.devcontainer:ro
