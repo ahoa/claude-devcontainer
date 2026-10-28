@@ -81,7 +81,14 @@ cd /path/to/your/project
 ./.devcontainer/start.sh feature-x  # run Claude on git worktree "feature-x"
 ./.devcontainer/update-fw.sh        # apply domains.conf + current addresses to the live container
 TMUX_WINDOWS=3 ./.devcontainer/start.sh   # override the window count for one run
+./.devcontainer/start.sh --plain    # one Claude in this terminal, no tmux
+./.devcontainer/attach.sh --plain   # one more Claude in this terminal, no tmux
 ```
+
+`--plain` is for a host that runs its own tmux. Run `start.sh --plain` in the
+first host window, and `attach.sh --plain` in each further window. Each window
+then holds one Claude, and the host tmux does the scrollback, the splits and the
+reconnects. `TMUX_WINDOWS` has no effect with `--plain`.
 
 The image has two parts. The base image `claude-devbase:<hash>` holds everything
 that is the same in every project: the system packages, Node, Java, Playwright,
@@ -225,15 +232,15 @@ template update cannot touch them. Everything else says `DO NOT CHANGE THIS FILE
 at the top and is replaced on update. Each of the four is a build input, so
 `start.sh` rebuilds when you change one.
 
+**The container sees `.devcontainer/` read-only.** Edit these files on the host.
+Claude in the container can read them but cannot change them.
+
 | File | What goes in it |
 |------|-----------------|
 | `tools.sh` | Toolchain beyond the Node, Java, Playwright, osv-scanner and Codex CLI the image already has — Python, database clients, … Plain shell, run as root at build time with unrestricted network. |
 | `domains.conf` | Outbound hosts, one per line. Only what your project adds: the baseline (Anthropic, npm, Docker Hub, `fm.codeborne.com`) is in `.template/domains-base.conf`, and GitHub ranges are fetched dynamically. |
 | `firewall.sh` | `iptables`/`ipset` rules hostnames cannot express. Sourced at container start while the rules are still being built, before the catch-all reject. |
 | `docker-compose.override.yml` | Services, published ports, environment, extra volumes. Merged on top of the template's compose file. |
-
-**The container sees `.devcontainer/` read-only.** Edit these files on the host.
-Claude in the container can read them but cannot change them.
 
 The firewall resolves each host once, at container start, and the rules match
 those addresses only. A CDN host can answer with other addresses later, so a download can fail

@@ -38,12 +38,16 @@ export COMPOSE_PROJECT_NAME
 #   -r | --resume   resume the most recent Claude session in this dir (claude --continue).
 #                   Useful right after a rebuild: the named config volume keeps the
 #                   transcript, so `-r` reloads it instead of starting fresh.
+#   --plain         run one Claude straight in this terminal, without tmux. For a
+#                   host that runs its own tmux: one host window per Claude.
 #   <name>          worktree name, forwarded as `claude --worktree <name>`.
 RESUME=""
 WORKTREE_NAME=""
+PLAIN=0
 for arg in "$@"; do
     case "$arg" in
         -r|--resume) RESUME=" --continue" ;;
+        --plain)     PLAIN=1 ;;
         *)           WORKTREE_NAME="$arg" ;;
     esac
 done
@@ -173,14 +177,14 @@ docker volume create "$CLAUDE_VOLUME" >/dev/null
 # never stop a start.
 if [[ "$(uname -s)" == "Linux" ]]; then
     DEV_UID="$(id -u)"
+    DEV_GID="$(id -g)"
 else
     DEV_UID="$(grep -m1 -oE 'useradd --uid [0-9]+' "$TEMPLATE_DIR/base/Dockerfile" | grep -oE '[0-9]+$' || true)"
+    DEV_GID="$(grep -m1 -oE 'groupadd --gid [0-9]+' "$TEMPLATE_DIR/base/Dockerfile" | grep -oE '[0-9]+$' || true)"
 fi
 VOLUME_UID="$(docker run --rm --user 0 --entrypoint sh -v "$CLAUDE_VOLUME:/v:ro" "$CLAUDE_DEVBASE_IMAGE" \
-    DEV_GID="$(id -g)"
     -c '[ -n "$(ls -A /v)" ] && stat -c %u /v' 2>/dev/null || true)"
 if [[ -n "$DEV_UID" && -n "$VOLUME_UID" && "$VOLUME_UID" != "$DEV_UID" ]]; then
-    DEV_GID="$(grep -m1 -oE 'groupadd --gid [0-9]+' "$TEMPLATE_DIR/base/Dockerfile" | grep -oE '[0-9]+$' || true)"
     {
         echo "WARNING: the volume '$CLAUDE_VOLUME' belongs to UID $VOLUME_UID, but the 'dev' user in this container is UID $DEV_UID."
         echo "         This start gives the volume to UID $DEV_UID."
@@ -192,15 +196,15 @@ if [[ -n "$DEV_UID" && -n "$VOLUME_UID" && "$VOLUME_UID" != "$DEV_UID" ]]; then
             echo "$OTHERS" | sed 's/^/           /'
         fi
     } >&2
-fi
-
-# An external network in docker-compose.override.yml must exist before `up`, or
-# compose stops with "declared as external, but could not be found". Usually the
     if [[ -n "$DEV_GID" ]]; then
         docker run --rm --user 0 --entrypoint chown -v "$CLAUDE_VOLUME:/v" "$CLAUDE_DEVBASE_IMAGE" \
             -R "$DEV_UID:$DEV_GID" /v \
             || echo "WARNING: could not give the volume '$CLAUDE_VOLUME' to UID $DEV_UID. Claude cannot save its login or its sessions." >&2
     fi
+fi
+
+# An external network in docker-compose.override.yml must exist before `up`, or
+# compose stops with "declared as external, but could not be found". Usually the
 # network belongs to the project's own dev stack, and nobody started that stack on
 # a new machine. So create each missing external network here.
 #
@@ -269,21 +273,7 @@ else
     CA_FLAG="$(bash "$TEMPLATE_DIR/ca-plugin-flag.sh")"
 fi
 
-# Attach to the running dev container as the configured remoteUser (`dev`) and
-# launch Claude inside a tmux session. The session is created on the first run
-# and re-attached on later runs, so start.sh and attach.sh share one live
-# session. Worktrees get their own session. On first creation the session gets
-# WINDOWS windows, each with its own Claude; `--continue` only makes sense for
-# one instance, so windows 2..N start fresh.
-if [[ -n "$WORKTREE_NAME" ]]; then
-    SESSION="claude-$WORKTREE_NAME"
-    CLAUDE_BASE_CMD="claude --dangerously-skip-permissions$CA_FLAG --worktree $WORKTREE_NAME"
-else
-    SESSION="claude"
-    CLAUDE_BASE_CMD="claude --dangerously-skip-permissions$CA_FLAG"
-fi
-CLAUDE_CMD="$CLAUDE_BASE_CMD$RESUME"
-
-echo "==> Attaching Claude in tmux session '$SESSION' ($WINDOWS window(s))..."
-exec "$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" --config "$TEMPLATE_DIR/devcontainer.json" \
-    zsh -c "if ! tmux has-session -t '$SESSION' 2>/dev/null; then tmux new-session -d -s '$SESSION' -n claude1 '$CLAUDE_CMD'; for i in \$(seq 2 $WINDOWS); do tmux new-window -d -t '$SESSION:' -n claude\$i '$CLAUDE_BASE_CMD'; done; fi; exec tmux attach -t '$SESSION'"
+# Claude in tmux, or with --plain in this terminal. See launch.sh.
+# shellcheck source=template/launch.sh
+source "$TEMPLATE_DIR/launch.sh"
+launch_claude "Attaching Claude in"

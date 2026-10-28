@@ -35,12 +35,16 @@ export COMPOSE_PROJECT_NAME
 #                   Takes effect only when no live tmux session exists yet (e.g. the
 #                   first attach after a container restart) — `tmux new-session`
 #                   attaches to an existing session and ignores the launch command.
+#   --plain         run one Claude straight in this terminal, without tmux. For a
+#                   host that runs its own tmux: one host window per Claude.
 #   <name>          worktree name, forwarded as `claude --worktree <name>`.
 RESUME=""
 WORKTREE_NAME=""
+PLAIN=0
 for arg in "$@"; do
     case "$arg" in
         -r|--resume) RESUME=" --continue" ;;
+        --plain)     PLAIN=1 ;;
         *)           WORKTREE_NAME="$arg" ;;
     esac
 done
@@ -85,20 +89,7 @@ else
     CA_FLAG="$(bash "$TEMPLATE_DIR/ca-plugin-flag.sh")"
 fi
 
-# Re-attach to (or create) the tmux session running Claude. If the session is
-# already live this attaches to it as-is — so it picks up exactly where a
-# previous, disconnected session left off, including from a different machine.
-# On first creation the session gets WINDOWS windows, each with its own Claude;
-# `--continue` only makes sense for one instance, so windows 2..N start fresh.
-if [[ -n "$WORKTREE_NAME" ]]; then
-    SESSION="claude-$WORKTREE_NAME"
-    CLAUDE_BASE_CMD="claude --dangerously-skip-permissions$CA_FLAG --worktree $WORKTREE_NAME"
-else
-    SESSION="claude"
-    CLAUDE_BASE_CMD="claude --dangerously-skip-permissions$CA_FLAG"
-fi
-CLAUDE_CMD="$CLAUDE_BASE_CMD$RESUME"
-
-echo "==> Attaching to tmux session '$SESSION' ($WINDOWS window(s))..."
-exec "$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" --config "$TEMPLATE_DIR/devcontainer.json" \
-    zsh -c "if ! tmux has-session -t '$SESSION' 2>/dev/null; then tmux new-session -d -s '$SESSION' -n claude1 '$CLAUDE_CMD'; for i in \$(seq 2 $WINDOWS); do tmux new-window -d -t '$SESSION:' -n claude\$i '$CLAUDE_BASE_CMD'; done; fi; exec tmux attach -t '$SESSION'"
+# Claude in tmux, or with --plain in this terminal. See launch.sh.
+# shellcheck source=template/launch.sh
+source "$TEMPLATE_DIR/launch.sh"
+launch_claude "Attaching to"

@@ -50,6 +50,7 @@ HIDDEN_FILES=(
     docker-check.sh
     tmux.conf
     ca-plugin-flag.sh
+    launch.sh
     ca-plugin-token.sh
     ca-plugin.sh
     ca-claude.zsh
