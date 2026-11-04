@@ -9,9 +9,11 @@
 #
 #   ca-plugin.sh install     install claude-agents@codeborne when the token exists
 #   ca-plugin.sh installed   exit 0 when Claude loads the installed plugin here
+#   ca-plugin.sh loop-start  start the tmux session of the night loop again
 #
 # The Dockerfile also copies this script to /usr/local/bin, so the claude()
-# function in ca-claude.zsh makes the same test.
+# function in ca-claude.zsh makes the same test. postStartCommand in
+# devcontainer.json runs loop-start on each container start.
 #
 # An installed plugin updates through Claude's own mechanism: the update at
 # start, /plugin and `claude plugin update`. The read-only host mount cannot do
@@ -33,23 +35,63 @@ TOKEN_FILE=/run/secrets/ca_plugin_token
 PLUGINS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins"
 SETTINGS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
 
-# Read from the files and not from `claude plugin list`: attach.sh asks on each
-# attach, and the files cost no Claude start. Claude loads an entry of the user
-# scope, or an entry whose projectPath is this workspace. The claude volume can
-# be shared between projects, so an entry for another workspace does not count.
-# An entry whose directory is gone does not count, and neither does a plugin
-# that settings.json disables.
-installed() {
+# The directory of the container's own install, when Claude loads it in this
+# workspace. Read from the files and not from `claude plugin list`: attach.sh
+# asks on each attach, and the files cost no Claude start. Claude loads an
+# entry of the user scope, or an entry whose projectPath is this workspace. The
+# claude volume can be shared between projects, so an entry for another
+# workspace does not count. An entry whose directory is gone does not count,
+# and neither does a plugin that settings.json disables.
+install_dir() {
   local workspace dir
   workspace="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
   [[ "$(jq -r --arg p "$PLUGIN" 'if .enabledPlugins[$p] == false then "off" else "on" end' \
     "$SETTINGS" 2>/dev/null)" != off ]] || return 1
   while read -r dir; do
-    [[ -n "$dir" && -d "$dir" ]] && return 0
+    [[ -n "$dir" && -d "$dir" ]] && { echo "$dir"; return 0; }
   done < <(jq -r --arg p "$PLUGIN" --arg ws "$workspace" \
     '.plugins[$p][]? | select(.scope == "user" or .projectPath == $ws) | .installPath' \
     "$PLUGINS_DIR/installed_plugins.json" 2>/dev/null)
   return 1
+}
+
+installed() { install_dir >/dev/null; }
+
+# The ca-loop to run: the launcher that `ca-loop setup` wrote, when it exists.
+# It finds the newest plugin itself, and ca-loop warns at each run from a
+# versioned path without it. /home/dev is not a volume, so a rebuild removes
+# the launcher. Then the ca-loop of the plugin that Claude loads here: the
+# container's own install, else the newest version of the host mount, which
+# CA_PLUGIN_CACHE names (docker-compose.yml). Nothing when none has the script.
+ca_loop() {
+  local dir launcher="$HOME/.local/bin/ca-loop"
+  [[ -x "$launcher" ]] && { echo "$launcher"; return 0; }
+  if ! dir="$(install_dir)"; then
+    [[ -n "${CA_PLUGIN_CACHE:-}" ]] || return 1
+    dir="$(ls -d "$CA_PLUGIN_CACHE"/*/ 2>/dev/null | sort -V | tail -1)"
+    dir="${dir%/}"
+  fi
+  [[ -n "$dir" && -x "$dir/scripts/ca-loop" ]] || return 1
+  echo "$dir/scripts/ca-loop"
+}
+
+# The night loop in a container runs in the tmux session ca-loop, which
+# `ca-loop service install` starts: a container has no launchd and no systemd.
+# A restart or a rebuild of the container ends that session. `ca-loop service
+# start` starts it again. It reads the projects of the service from
+# ~/.claude/loop/service.projects on the claude volume and serves the listed
+# ones that exist in this container. It exits 0 when the session runs, when no
+# listed project is here, and when no project ran service install. So
+# postStartCommand runs this on every start, with no opt-in check of its own.
+# It runs after the firewall, because a tick needs the allowed hosts. A failure
+# here must not fail the container start. A plugin before 1.5.31 has no
+# service start.
+loop_start() {
+  local ca_loop
+  ca_loop="$(ca_loop)" || return 0
+  "$ca_loop" service start \
+    || echo "NOTE: '$ca_loop service start' failed, so the night loop does not run in this container. A plugin before 1.5.31 has no service start." >&2
+  return 0
 }
 
 marketplace_known() {
@@ -87,7 +129,8 @@ install() {
 }
 
 case "${1:-}" in
-  install)   install ;;
-  installed) installed ;;
-  *)         echo "Usage: $0 install|installed" >&2; exit 2 ;;
+  install)    install ;;
+  installed)  installed ;;
+  loop-start) loop_start ;;
+  *)          echo "Usage: $0 install|installed|loop-start" >&2; exit 2 ;;
 esac

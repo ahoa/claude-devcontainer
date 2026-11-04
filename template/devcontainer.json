@@ -28,7 +28,14 @@
   // A config volume that belongs to another UID gets its owner from start.sh, on
   // the host, before `up`. A chown here would need sudo, and with --docker off dev
   // has sudo for the firewall script only.
-  "postStartCommand": "mkdir -p -m 700 \"$CODEX_HOME\" && sudo /usr/local/bin/init-firewall.sh && .devcontainer/.template/fw-watch.sh --start",
+  //
+  // Last, the night loop. `ca-loop service install` in a container runs the
+  // loop in the tmux session ca-loop, and a restart or a rebuild ends that
+  // session. ca-plugin.sh loop-start starts it again. After the firewall,
+  // because a tick needs the allowed hosts. As dev, because ~/.claude/loop
+  // belongs to dev. It always exits 0, so a loop that cannot start does not
+  // stop the container.
+  "postStartCommand": "mkdir -p -m 700 \"$CODEX_HOME\" && sudo /usr/local/bin/init-firewall.sh && .devcontainer/.template/fw-watch.sh --start && .devcontainer/.template/ca-plugin.sh loop-start",
   // Runs on the HOST, before the mount. A missing source makes a bind mount
   // fail, and the container does not start.
   "initializeCommand": "mkdir -p ${localEnv:HOME}/.claude/plugins/cache/codeborne/claude-agents",

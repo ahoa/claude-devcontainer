@@ -145,17 +145,15 @@ with `docker image rm <name>-devcontainer`.
 
 ## Loop
 
-The night loop runs on the host, not in this container. `ca-loop`, a script of
-the ca plugin, runs one story per tick on the host, in a sandbox of its own and
-with a settings file that lists what a tick may run. `ca-loop service install`
-puts it on launchd or systemd there. The steps are in the README of
+`ca-loop`, a script of the ca plugin, runs the night loop: one story per tick,
+in a sandbox of its own and with a settings file that lists what a tick may
+run. The steps are in the README of
 [claude-agents](https://github.com/codeborne/claude-agents), section Loop.
+`ca-loop service install` keeps the loop running, on the host or in this
+container.
 
-Earlier versions of this template shipped `loop.sh`, which started a loop runner
-inside the container. The plugin has no such runner any more, and `install.sh`
-removes the file from a project on the next update.
-
-Two rules for a project that is developed in this container:
+On the host, the service is launchd or systemd. Two rules for a project that
+is developed in this container:
 
 - Give the loop a clone of its own. `node_modules` of this checkout is
   bind-mounted into the container, and its native binaries are the container's,
@@ -163,6 +161,23 @@ Two rules for a project that is developed in this container:
 - The test, build and E2E commands of the project must run on the host.
   `ca-loop check` shows the ones that do not. A runner that reaches its test
   stack by container name over the devcontainer's network runs nowhere else.
+
+In this container, with plugin 1.5.31 or later, the service is a tmux session
+named `ca-loop`, because a container has no launchd and no systemd. A restart
+or a rebuild of the container ends that session. `postStartCommand` starts it
+again on each start, after the firewall, through `ca-plugin.sh loop-start`.
+Watch the session with `tmux attach -t ca-loop` in the container.
+
+The start reads the loop projects from `~/.claude/loop/service.projects` on
+the claude volume, and serves the listed ones that exist in this container.
+The claude volume can be shared, so each project on it sees the same list. The
+start does nothing when no project in this container ran `service install`.
+With an older plugin the start fails, the output of `start.sh` says so, and
+the container starts anyway.
+
+Earlier versions of this template shipped `loop.sh`, which started a loop runner
+inside the container. The plugin has no such runner any more, and `install.sh`
+removes the file from a project on the next update.
 
 ## Pushing from the container
 
