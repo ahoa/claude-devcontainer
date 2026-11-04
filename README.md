@@ -131,6 +131,26 @@ them once. Sessions written after the update stay separate. The installer copies
 auto-memory files instead of linking them, because two projects that share one
 file read each other's edits.
 
+The container has its own `node_modules`. A `node_modules` holds native
+binaries for one OS and one CPU only, for example `lightningcss`, `esbuild` and
+`rollup`. A copy from the macOS host does not run in the Linux container, and a
+copy from the container does not run on the host. So `start.sh` finds each
+directory with a `package.json` and mounts a Docker volume over its
+`node_modules` in the container. The host keeps its own `node_modules`. The
+search skips hidden directories, `node_modules`, `target`, `build`, `dist` and
+`out`. The volumes are `<name>-dc_nm_<hash>`, with the label
+`claude-devcontainer.node-modules=<name>-dc`. A new or removed `package.json`
+recreates the container on the next `start.sh`.
+
+At each start, the container fills each empty volume from the lockfile beside
+it: `npm ci`, `pnpm install --frozen-lockfile` or `yarn install` with a frozen
+lockfile. A directory without a lockfile gets no install. The install runs the
+install scripts of the dependencies, as `dev`, behind the firewall. So a fresh
+clone runs its lockfile's scripts at the first start, before anybody runs an
+install. A failed install gives a warning, and the container starts. Then run
+the install in the container yourself. The volumes stay after the project is
+removed. List them with `docker volume ls --filter label=claude-devcontainer.node-modules`.
+
 The devcontainer's own compose project is `<name>-dc`, not `<name>`. Inside the
 container the repo sits at `/workspace/<name>`, and a bare `docker compose` there
 takes `<name>` as its project name. Without the suffix that name is the
@@ -152,12 +172,9 @@ run. The steps are in the README of
 `ca-loop service install` keeps the loop running, on the host or in this
 container.
 
-On the host, the service is launchd or systemd. Two rules for a project that
+On the host, the service is launchd or systemd. One rule for a project that
 is developed in this container:
 
-- Give the loop a clone of its own. `node_modules` of this checkout is
-  bind-mounted into the container, and its native binaries are the container's,
-  not the host's.
 - The test, build and E2E commands of the project must run on the host.
   `ca-loop check` shows the ones that do not. A runner that reaches its test
   stack by container name over the devcontainer's network runs nowhere else.
@@ -360,6 +377,7 @@ CLAUDE_DEVCONTAINER_REPO=https://github.com/you/your-fork ./install.sh --name my
 | File | Effect of deleting it |
 |------|-----------------------|
 | `.devcontainer/.build-hash` | Next `start.sh` does a clean rebuild. Gitignored. |
+| `.devcontainer/.node-modules.yml` | Next `start.sh` writes it again. `attach.sh` writes an empty one. Gitignored. |
 | `.devcontainer/.update-check` | Next update check fetches the remote SHA instead of the day-old cache. Gitignored. |
 | The login volume (`claude-shared`, or `<name>_claude`) | Discards the Claude login it holds. |
 | `~/.config/claude-devcontainer/ca-plugin-token-ref` | Next `start.sh` asks for the 1Password reference of the ca plugin token again. On the host, for every project. |

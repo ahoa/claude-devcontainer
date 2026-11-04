@@ -11,7 +11,10 @@
   "name": "__PROJECT_NAME__",
   "dockerComposeFile": [
     "docker-compose.yml",
-    "../docker-compose.override.yml"
+    "../docker-compose.override.yml",
+    // Written by node-modules.sh on the host at each start: a volume over each
+    // node_modules, so the container gets its own platform's native binaries.
+    "../.node-modules.yml"
   ],
   "service": "devcontainer",
   "workspaceFolder": "/workspace/__PROJECT_NAME__",
@@ -35,7 +38,12 @@
   // because a tick needs the allowed hosts. As dev, because ~/.claude/loop
   // belongs to dev. It always exits 0, so a loop that cannot start does not
   // stop the container.
-  "postStartCommand": "mkdir -p -m 700 \"$CODEX_HOME\" && sudo /usr/local/bin/init-firewall.sh && .devcontainer/.template/fw-watch.sh --start && .devcontainer/.template/ca-plugin.sh loop-start",
+  //
+  // Before the loop, node-modules.sh fills each empty node_modules volume from
+  // its lockfile. After the firewall, because the install needs the npm
+  // registry. It always exits 0, so a failed install does not stop the
+  // container.
+  "postStartCommand": "mkdir -p -m 700 \"$CODEX_HOME\" && sudo /usr/local/bin/init-firewall.sh && .devcontainer/.template/fw-watch.sh --start && .devcontainer/.template/node-modules.sh install && .devcontainer/.template/ca-plugin.sh loop-start",
   // Runs on the HOST, before the mount. A missing source makes a bind mount
   // fail, and the container does not start.
   "initializeCommand": "mkdir -p ${localEnv:HOME}/.claude/plugins/cache/codeborne/claude-agents",

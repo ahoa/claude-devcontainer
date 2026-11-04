@@ -81,12 +81,13 @@ finish_template_files() {
         chmod +x "$DEST/$f"
     done
 
-    # Keep runtime artifacts out of git: the build-input hash, the update-check cache
-    # and the devcontainer CLI start.sh installs under .template/. Entry by entry, so
+    # Keep runtime artifacts out of git: the build-input hash, the update-check cache,
+    # the node_modules volumes that start.sh writes, and the devcontainer CLI
+    # start.sh installs under .template/. Entry by entry, so
     # an install that predates one of them gains it — the file as a whole is left
     # alone, in case the project added lines of its own.
     touch "$DEST/.gitignore"
-    for ignore in .build-hash .update-check node_modules/; do
+    for ignore in .build-hash .update-check .node-modules.yml node_modules/; do
         grep -qxF "$ignore" "$DEST/.gitignore" || echo "$ignore" >> "$DEST/.gitignore"
     done
 }

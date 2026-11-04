@@ -35,6 +35,9 @@ if [[ ! -x "$DEVCONTAINER_BIN" ]]; then
   echo "ERROR: devcontainer CLI not found at $DEVCONTAINER_BIN. Run ./start.sh first." >&2
   exit 1
 fi
+# The devcontainer CLI reads every compose file in devcontainer.json, and only
+# start.sh writes this one. See node-modules.sh.
+"$TEMPLATE_DIR/node-modules.sh" stub
 EXEC=("$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" --config "$TEMPLATE_DIR/devcontainer.json")
 # Report what exec printed. A missing container is only one reason this fails.
 # An old container that still mounts the project at the path the config used

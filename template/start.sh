@@ -203,6 +203,17 @@ if [[ -n "$DEV_UID" && -n "$VOLUME_UID" && "$VOLUME_UID" != "$DEV_UID" ]]; then
     fi
 fi
 
+# The container's own node_modules, see node-modules.sh. A new or removed
+# package.json changes the volumes, and `up` reuses a container with its old
+# mounts, so a changed list recreates the container.
+NODE_MODULES_FILE="$SCRIPT_DIR/.node-modules.yml"
+NODE_MODULES_BEFORE="$(cat "$NODE_MODULES_FILE" 2>/dev/null || true)"
+"$TEMPLATE_DIR/node-modules.sh" prepare "$CLAUDE_DEVBASE_IMAGE" "$DEV_UID" "$DEV_GID"
+if [[ "$(cat "$NODE_MODULES_FILE")" != "$NODE_MODULES_BEFORE" && ! " ${UP_ARGS[*]} " =~ " --remove-existing-container " ]]; then
+    echo "==> The package.json directories changed — recreating the container for its node_modules volumes"
+    UP_ARGS+=(--remove-existing-container)
+fi
+
 # An external network in docker-compose.override.yml must exist before `up`, or
 # compose stops with "declared as external, but could not be found". Usually the
 # network belongs to the project's own dev stack, and nobody started that stack on

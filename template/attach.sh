@@ -62,6 +62,10 @@ if [[ ! -x "$DEVCONTAINER_BIN" ]]; then
     exit 1
 fi
 
+# The devcontainer CLI reads every compose file in devcontainer.json, and only
+# start.sh writes this one. See node-modules.sh.
+"$TEMPLATE_DIR/node-modules.sh" stub
+
 # Report what exec printed. A missing container is only one reason this fails.
 # An old container that still mounts the project at the path the config used
 # before an update fails here too, because exec cannot change to the workspace
