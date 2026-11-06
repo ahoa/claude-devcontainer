@@ -83,12 +83,55 @@ cd /path/to/your/project
 TMUX_WINDOWS=3 ./.devcontainer/start.sh   # override the window count for one run
 ./.devcontainer/start.sh --plain    # one Claude in this terminal, no tmux
 ./.devcontainer/attach.sh --plain   # one more Claude in this terminal, no tmux
+./.devcontainer/start.sh --up-only  # start the container, no Claude
+./.devcontainer/attach.sh --dir app # Claude in the subdirectory app
 ```
 
 `--plain` is for a host that runs its own tmux. Run `start.sh --plain` in the
 first host window, and `attach.sh --plain` in each further window. Each window
 then holds one Claude, and the host tmux does the scrollback, the splits and the
 reconnects. `TMUX_WINDOWS` has no effect with `--plain`.
+
+### Several projects in one container
+
+Install the template in a parent directory that holds the projects. This
+directory is a domain:
+
+```
+~/work/codeborne/internal/      ← install.sh here, .devcontainer/ is here
+├── beat/                       ← a git repository
+└── hr-borne/                   ← a git repository
+```
+
+The container mounts the whole domain. Each Claude must start in its project
+with `--dir`. Claude names its session folder after its working directory, so
+each project then has its own sessions, `/resume` list and memory. A Claude in
+the domain root puts the sessions of all projects in one folder. For this
+reason `start.sh` and `attach.sh` stop without `--dir` in a domain. A domain
+is a directory that is not a git repository and holds one or more
+subdirectories with a `.git` directory.
+
+```sh
+./.devcontainer/start.sh --up-only                # once, before the windows
+./.devcontainer/attach.sh --plain --dir beat      # host window 1
+./.devcontainer/attach.sh --plain --dir hr-borne  # host window 2
+```
+
+Without `--plain`, each project gets its own tmux session in the container,
+`claude-<project>`.
+
+Do not keep a `.devcontainer/` in the projects of a domain. The read-only mount
+covers the `.devcontainer/` of the domain only. The agent can change the
+scripts of a project's `.devcontainer/`, and they run on the host.
+
+One container has one set of `domains.conf`, `tools.sh` and
+`docker-compose.override.yml`. They must cover every project of the domain.
+The projects share one network namespace, so two dev servers on the same port
+collide. The night loop serves the projects of the domain one tick at a time,
+not in parallel.
+
+To keep the `/resume` all-projects view (`Ctrl+A`) to the projects of one
+domain, give the domain its own Claude volume at install.
 
 The image has two parts. The base image `claude-devbase:<hash>` holds everything
 that is the same in every project: the system packages, Node, Java, Playwright,

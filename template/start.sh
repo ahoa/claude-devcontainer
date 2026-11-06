@@ -15,14 +15,14 @@ TEMPLATE_DIR="$SCRIPT_DIR/.template"
 # Claude). Set at install time; override at run time with TMUX_WINDOWS=N.
 WINDOWS="${TMUX_WINDOWS:-__TMUX_WINDOWS__}"
 
-# Both values below are pasted into a shell command that runs in the container
-# (see the last line of this script), so both are checked first. Without the
-# check, `TMUX_WINDOWS='1; curl … | sh'` ran that command, and a worktree name
-# that held a quote closed the quoting and did the same. The installer validates
-# the number it writes above, but not what the environment overrides it with.
-if [[ ! "$WINDOWS" =~ ^[1-9][0-9]*$ ]]; then
-    echo "ERROR: TMUX_WINDOWS must be a positive integer (got '$WINDOWS')." >&2
-    exit 1
+# The arguments and their checks are in launch.sh, shared with attach.sh. The
+# checks run here, before the slow start, so a bad value stops at once. With
+# --up-only no Claude starts, so a domain needs no --dir.
+# shellcheck source=template/launch.sh
+source "$TEMPLATE_DIR/launch.sh"
+parse_args start "$@"
+if [[ $UP_ONLY -eq 0 || -n "$PROJECT_SUBDIR" ]]; then
+    check_project_dir
 fi
 
 # Pin the compose project name from docker-compose.yml's top-level `name:`.
@@ -33,28 +33,6 @@ fi
 # to agree on a single name.
 COMPOSE_PROJECT_NAME="$(awk -F': *' '/^name:/{print $2; exit}' "$TEMPLATE_DIR/docker-compose.yml")"
 export COMPOSE_PROJECT_NAME
-
-# Args (any order):
-#   -r | --resume   resume the most recent Claude session in this dir (claude --continue).
-#                   Useful right after a rebuild: the named config volume keeps the
-#                   transcript, so `-r` reloads it instead of starting fresh.
-#   --plain         run one Claude straight in this terminal, without tmux. For a
-#                   host that runs its own tmux: one host window per Claude.
-#   <name>          worktree name, forwarded as `claude --worktree <name>`.
-RESUME=""
-WORKTREE_NAME=""
-PLAIN=0
-for arg in "$@"; do
-    case "$arg" in
-        -r|--resume) RESUME=" --continue" ;;
-        --plain)     PLAIN=1 ;;
-        *)           WORKTREE_NAME="$arg" ;;
-    esac
-done
-if [[ -n "$WORKTREE_NAME" && ! "$WORKTREE_NAME" =~ ^[A-Za-z0-9_.][A-Za-z0-9_./-]*$ ]]; then
-    echo "ERROR: worktree name may hold letters, digits, '.', '_', '-' and '/' only (got '$WORKTREE_NAME')." >&2
-    exit 1
-fi
 
 # Install the Dev Containers CLI on demand, into .template/ and not into the
 # project's own node_modules. Official distribution channel is npm — see
@@ -277,6 +255,12 @@ echo "$BUILD_HASH" > "$HASH_FILE"
 # claude() function there never reaches this session.
 "$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" --config "$TEMPLATE_DIR/devcontainer.json" \
     .devcontainer/.template/ca-plugin.sh install || true
+
+if [[ $UP_ONLY -eq 1 ]]; then
+    echo "==> The container runs. Start Claude with attach.sh."
+    exit 0
+fi
+
 if "$DEVCONTAINER_BIN" exec --workspace-folder "$PROJECT_DIR" --config "$TEMPLATE_DIR/devcontainer.json" \
     .devcontainer/.template/ca-plugin.sh installed >/dev/null 2>&1; then
     CA_FLAG=""
@@ -284,7 +268,4 @@ else
     CA_FLAG="$(bash "$TEMPLATE_DIR/ca-plugin-flag.sh")"
 fi
 
-# Claude in tmux, or with --plain in this terminal. See launch.sh.
-# shellcheck source=template/launch.sh
-source "$TEMPLATE_DIR/launch.sh"
 launch_claude "Attaching Claude in"

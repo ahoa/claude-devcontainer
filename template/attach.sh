@@ -14,44 +14,17 @@ TEMPLATE_DIR="$SCRIPT_DIR/.template"
 # Claude). Set at install time; override at run time with TMUX_WINDOWS=N.
 WINDOWS="${TMUX_WINDOWS:-__TMUX_WINDOWS__}"
 
-# Both values below are pasted into a shell command that runs in the container
-# (see the last line of this script), so both are checked first. Without the
-# check, `TMUX_WINDOWS='1; curl … | sh'` ran that command, and a worktree name
-# that held a quote closed the quoting and did the same. The installer validates
-# the number it writes above, but not what the environment overrides it with.
-if [[ ! "$WINDOWS" =~ ^[1-9][0-9]*$ ]]; then
-    echo "ERROR: TMUX_WINDOWS must be a positive integer (got '$WINDOWS')." >&2
-    exit 1
-fi
+# The arguments and their checks are in launch.sh, shared with start.sh.
+# shellcheck source=template/launch.sh
+source "$TEMPLATE_DIR/launch.sh"
+parse_args attach "$@"
+check_project_dir
 
 # Pin the compose project name from docker-compose.yml's top-level `name:` so
 # `devcontainer exec` looks up the container under the same project name that
 # `start.sh`'s `devcontainer up` created it under. See start.sh for details.
 COMPOSE_PROJECT_NAME="$(awk -F': *' '/^name:/{print $2; exit}' "$TEMPLATE_DIR/docker-compose.yml")"
 export COMPOSE_PROJECT_NAME
-
-# Args (any order):
-#   -r | --resume   resume the most recent Claude session in this dir (claude --continue).
-#                   Takes effect only when no live tmux session exists yet (e.g. the
-#                   first attach after a container restart) — `tmux new-session`
-#                   attaches to an existing session and ignores the launch command.
-#   --plain         run one Claude straight in this terminal, without tmux. For a
-#                   host that runs its own tmux: one host window per Claude.
-#   <name>          worktree name, forwarded as `claude --worktree <name>`.
-RESUME=""
-WORKTREE_NAME=""
-PLAIN=0
-for arg in "$@"; do
-    case "$arg" in
-        -r|--resume) RESUME=" --continue" ;;
-        --plain)     PLAIN=1 ;;
-        *)           WORKTREE_NAME="$arg" ;;
-    esac
-done
-if [[ -n "$WORKTREE_NAME" && ! "$WORKTREE_NAME" =~ ^[A-Za-z0-9_.][A-Za-z0-9_./-]*$ ]]; then
-    echo "ERROR: worktree name may hold letters, digits, '.', '_', '-' and '/' only (got '$WORKTREE_NAME')." >&2
-    exit 1
-fi
 
 # Fast path — assumes start.sh has already brought the container up and
 # installed the devcontainer CLI under .template/. Errors out cleanly if either is
@@ -93,7 +66,4 @@ else
     CA_FLAG="$(bash "$TEMPLATE_DIR/ca-plugin-flag.sh")"
 fi
 
-# Claude in tmux, or with --plain in this terminal. See launch.sh.
-# shellcheck source=template/launch.sh
-source "$TEMPLATE_DIR/launch.sh"
 launch_claude "Attaching to"
