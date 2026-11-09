@@ -61,7 +61,11 @@ container gets it in one of two ways:
   `op://Employee/claude-agents-github-token/credential`) and reads it with
   `op read` on each start. The 1Password CLI (`op`) must be signed in. The
   container gets the token when it is created, so a new or changed token needs
-  a rebuild: remove `.devcontainer/.build-hash` and run `start.sh`.
+  a rebuild: remove `.devcontainer/.build-hash` and run `start.sh`. The token
+  also keeps the `agents` segment of the statusline current: `gh` has no login
+  in the container, so `ca-plugin.sh version-watch` reads the released version
+  with the token once an hour, on each container start. Without it the segment
+  shows `?` one day after the host last wrote the version into the project.
 - **The host's install, read-only.** Without a token, the container uses the
   newest version under `~/.claude/plugins/cache/codeborne/claude-agents/` on the
   host, and only the host can update it. Install it on the host with

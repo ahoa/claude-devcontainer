@@ -43,7 +43,12 @@
   // its lockfile. After the firewall, because the install needs the npm
   // registry. It always exits 0, so a failed install does not stop the
   // container.
-  "postStartCommand": "mkdir -p -m 700 \"$CODEX_HOME\" && sudo /usr/local/bin/init-firewall.sh && .devcontainer/.template/fw-watch.sh --start && .devcontainer/.template/node-modules.sh install && .devcontainer/.template/ca-plugin.sh loop-start",
+  //
+  // Last, the released version of the ca plugin for the statusline. The
+  // statusline refreshes it with gh, which has no login in the container, so
+  // ca-plugin.sh version-watch writes the cache with the plugin token once an
+  // hour, in the background. Without a token it does nothing. It exits 0.
+  "postStartCommand": "mkdir -p -m 700 \"$CODEX_HOME\" && sudo /usr/local/bin/init-firewall.sh && .devcontainer/.template/fw-watch.sh --start && .devcontainer/.template/node-modules.sh install && .devcontainer/.template/ca-plugin.sh loop-start && .devcontainer/.template/ca-plugin.sh version-watch",
   // Runs on the HOST, before the mount. A missing source makes a bind mount
   // fail, and the container does not start.
   "initializeCommand": "mkdir -p ${localEnv:HOME}/.claude/plugins/cache/codeborne/claude-agents",

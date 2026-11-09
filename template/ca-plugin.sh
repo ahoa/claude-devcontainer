@@ -10,6 +10,8 @@
 #   ca-plugin.sh install     install claude-agents@codeborne when the token exists
 #   ca-plugin.sh installed   exit 0 when Claude loads the installed plugin here
 #   ca-plugin.sh loop-start  start the tmux session of the night loop again
+#   ca-plugin.sh version-cache  write the released plugin version to the cache once
+#   ca-plugin.sh version-watch  write it now and then once an hour, in the background
 #
 # The Dockerfile also copies this script to /usr/local/bin, so the claude()
 # function in ca-claude.zsh makes the same test. postStartCommand in
@@ -31,7 +33,7 @@ set -uo pipefail
 PLUGIN="claude-agents@codeborne"
 MARKETPLACE_NAME="codeborne"
 MARKETPLACE_SOURCE="codeborne/claude-agents"
-TOKEN_FILE=/run/secrets/ca_plugin_token
+TOKEN_FILE="${CA_PLUGIN_TOKEN_FILE:-/run/secrets/ca_plugin_token}"
 PLUGINS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins"
 SETTINGS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
 
@@ -94,6 +96,69 @@ loop_start() {
   return 0
 }
 
+# The released plugin version, in the cache file that the plugin's statusline
+# and its update check read: ~/.cache/claude-agents-remote-version. Both
+# refresh that file with gh, and gh in the container has no login. The host
+# writes a mirror into <project>/.claude/latest-version, but only when Claude
+# runs in that project on the host. A project that runs in the container only
+# gets no mirror, and one day after the last one the statusline shows
+# "agents 1.5.33 ?". The token of the compose secret reads plugin.json of the
+# marketplace repo, so the container keeps its own cache fresh. curl reads the
+# token from a config on stdin, so the token is not in the process list.
+VERSION_CACHE="$HOME/.cache/claude-agents-remote-version"
+VERSION_TTL=3600
+VERSION_PIDFILE=/tmp/ca-version-watch.pid
+VERSION_URL="https://api.github.com/repos/$MARKETPLACE_SOURCE/contents/.claude-plugin/plugin.json"
+
+version_cache() {
+  local mtime v
+  [[ -s "$TOKEN_FILE" ]] || return 0
+  if [[ -f "$VERSION_CACHE" ]]; then
+    mtime="$(stat -c %Y "$VERSION_CACHE" 2>/dev/null || stat -f %m "$VERSION_CACHE" 2>/dev/null || echo 0)"
+    (( $(date +%s) - mtime < VERSION_TTL )) && return 0
+  fi
+  v="$(curl -fsS --max-time 5 -K - -H 'Accept: application/vnd.github.raw' "$VERSION_URL" \
+        <<<"header = \"Authorization: Bearer $(tr -d '[:space:]' < "$TOKEN_FILE")\"" 2>/dev/null \
+      | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+  # Only a version reaches the file. The statusline shows what it reads, and
+  # an error body would stay in the status bar for an hour.
+  [[ "$v" =~ ^[0-9]+(\.[0-9]+)+$ ]] || return 0
+  mkdir -p "$(dirname "$VERSION_CACHE")" 2>/dev/null || return 0
+  # In place, as the statusline writes it, so a reader keeps the same inode.
+  printf '%s\n' "$v" > "$VERSION_CACHE"
+}
+
+# Is that pid a version loop of this script? The pid alone is not enough: the
+# file outlives the process, and the container reuses pids.
+is_version_loop() {
+  tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null | grep -q 'ca-plugin.sh version-loop'
+}
+
+# The loop runs in the background and outlives the shell that started it:
+# postStartCommand returns at once. A loop from an earlier start goes first,
+# because `devcontainer up` on a running container runs postStartCommand again.
+# The loop has no trap, so TERM ends it at once, and its sleep exits alone.
+version_watch() {
+  local old launch
+  [[ -s "$TOKEN_FILE" ]] || return 0
+  old="$(cat "$VERSION_PIDFILE" 2>/dev/null || true)"
+  if [[ "$old" =~ ^[0-9]+$ ]] && is_version_loop "$old"; then
+    kill "$old" 2>/dev/null || true
+  fi
+  launch=(nohup)
+  command -v setsid >/dev/null 2>&1 && launch=(setsid nohup)
+  "${launch[@]}" "$0" version-loop >/dev/null 2>&1 </dev/null &
+  return 0
+}
+
+version_loop() {
+  echo $$ > "$VERSION_PIDFILE"
+  while :; do
+    version_cache
+    sleep "$VERSION_TTL"
+  done
+}
+
 marketplace_known() {
   grep -q "\"$MARKETPLACE_NAME\"" "$PLUGINS_DIR/known_marketplaces.json" 2>/dev/null
 }
@@ -139,5 +204,8 @@ case "${1:-}" in
   install)    install ;;
   installed)  installed ;;
   loop-start) loop_start ;;
-  *)          echo "Usage: $0 install|installed|loop-start" >&2; exit 2 ;;
+  version-cache) version_cache ;;
+  version-watch) version_watch ;;
+  version-loop)  version_loop ;;
+  *)          echo "Usage: $0 install|installed|loop-start|version-cache|version-watch" >&2; exit 2 ;;
 esac
