@@ -114,15 +114,21 @@ install() {
   echo "==> Installing the ca plugin in the container ($PLUGIN)"
   # The container has no SSH key, so the clone must use HTTPS.
   export CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1
+  # --foreground keeps claude in the process group that owns the terminal.
+  # Without it, timeout puts claude in a group of its own. start.sh runs this
+  # script with a TTY, and the kernel stops claude with SIGTTOU when claude
+  # changes the terminal mode from that background group. The stopped claude
+  # does no work until the timeout ends it. With --foreground, a timeout ends
+  # claude only and not its git children.
   # A marketplace from an earlier attempt that stopped before the install.
   if ! marketplace_known; then
-    if ! timeout 120 claude plugin marketplace add "$MARKETPLACE_SOURCE"; then
+    if ! timeout --foreground 120 claude plugin marketplace add "$MARKETPLACE_SOURCE"; then
       echo "WARNING: could not add the marketplace $MARKETPLACE_SOURCE. Claude starts with the host plugin." >&2
       echo "         Examine the token: GIT_TERMINAL_PROMPT=0 git ls-remote https://github.com/$MARKETPLACE_SOURCE.git" >&2
       return 0
     fi
   fi
-  if ! timeout 120 claude plugin install "$PLUGIN"; then
+  if ! timeout --foreground 120 claude plugin install "$PLUGIN"; then
     echo "WARNING: could not install $PLUGIN. Claude starts with the host plugin." >&2
   fi
   return 0
