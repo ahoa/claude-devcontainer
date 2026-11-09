@@ -118,7 +118,8 @@ install() {
   # Without it, timeout puts claude in a group of its own. start.sh runs this
   # script with a TTY, and the kernel stops claude with SIGTTOU when claude
   # changes the terminal mode from that background group. The stopped claude
-  # does no work until the timeout ends it. With --foreground, a timeout ends
+  # does no work, and the timeout did not end it: one install hung for 50
+  # minutes under 'timeout 120'. With --foreground, a timeout ends
   # claude only and not its git children.
   # A marketplace from an earlier attempt that stopped before the install.
   if ! marketplace_known; then
