@@ -317,7 +317,7 @@ Claude in the container can read them but cannot change them.
 | File | What goes in it |
 |------|-----------------|
 | `tools.sh` | Toolchain beyond the Node, Java, Playwright, osv-scanner and Codex CLI the image already has — Python, database clients, … Plain shell, run as root at build time with unrestricted network. |
-| `domains.conf` | Outbound hosts, one per line. Only what your project adds: the baseline (Anthropic, npm, Docker Hub, `fm.codeborne.com`) is in `.template/domains-base.conf`, and GitHub ranges are fetched dynamically. |
+| `domains.conf` | Outbound hosts, one per line. Only what your project adds: the baseline (Anthropic, npm, Docker Hub, `codeborne.com` with its subdomains) is in `.template/domains-base.conf`, and GitHub ranges are fetched dynamically. |
 | `firewall.sh` | `iptables`/`ipset` rules hostnames cannot express. Sourced at container start while the rules are still being built, before the catch-all reject. |
 | `docker-compose.override.yml` | Services, published ports, environment, extra volumes. Merged on top of the template's compose file. |
 
