@@ -20,6 +20,11 @@ services:
         # default is only for a compose call without start.sh, and a build then
         # stops with a clear "claude-devbase:missing not found".
         BASE_IMAGE: ${CLAUDE_DEVBASE_IMAGE:-claude-devbase:missing}
+    # PID 1 is `sleep infinity`, which never reaps children. Every finished git,
+    # gh and statusline.sh stayed a zombie, and tens of thousands filled the
+    # process table until posix_spawn failed with EAGAIN. init: true makes
+    # Docker run tini as PID 1, and tini reaps them.
+    init: true
     cap_add:
       - NET_ADMIN
       - NET_RAW
