@@ -619,8 +619,11 @@ Install with `--docker off` and mount the real path in
   volume (`--login project`) so one unattended run cannot read the rest.
 - **Every container can read every aTerm paste.** The `~/.cache/aterm` mount
   is the same in every project, also with `--login project`. The shim uses
-  only the last minute, but an agent can read the whole directory. aTerm keeps
-  old pastes there, and a screenshot can show a secret. Delete old pastes on
-  the host with `find ~/.cache/aterm -name 'paste-*' -mmin +1 -delete`. The
-  template makes the directory owner-only, so other users on the host cannot
-  read it.
+  only the last minute, but an agent can read the whole directory, and a
+  screenshot can show a secret. On a Mac host with a GUI session, each aTerm
+  upload deletes the pastes older than one minute. The last paste stays until
+  the next upload. On other hosts aTerm keeps the pastes for one day. An aTerm
+  build older than 2026-11-23 keeps every paste for one day on every host.
+  Delete old pastes on the host with
+  `find ~/.cache/aterm -name 'paste-*' -mmin +1 -delete`. The template makes the
+  directory owner-only, so other users on the host cannot read it.
