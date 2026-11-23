@@ -34,6 +34,13 @@ fi
 COMPOSE_PROJECT_NAME="$(awk -F': *' '/^name:/{print $2; exit}' "$TEMPLATE_DIR/docker-compose.yml")"
 export COMPOSE_PROJECT_NAME
 
+# Compose v5 builds through Buildx Bake. Bake does not read a file outside the
+# working directory without an fs entitlement. The devcontainer CLI writes its
+# Dockerfile-with-features to the OS temp folder, and a non-interactive build
+# cannot grant the entitlement, so the build stops. This variable turns the
+# check off. COMPOSE_BAKE=false does not help on Compose v5.
+export BUILDX_BAKE_ENTITLEMENTS_FS=0
+
 # Install the Dev Containers CLI on demand, into .template/ and not into the
 # project's own node_modules. Official distribution channel is npm — see
 # https://github.com/devcontainers/cli
