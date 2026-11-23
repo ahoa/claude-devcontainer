@@ -34,13 +34,15 @@
       "mcp__stories__remove_labels",
       "mcp__stories__increment_attempt",
       "Bash(*/.claude/hooks/lib/deploy-env-check.sh*)",
-      "mcp__stories__get_story_images"
+      "mcp__stories__get_story_images",
+      "Bash(*/skills/retro/learning-files.sh*)",
+      "Bash(*/.claude/hooks/lib/story-lint.sh*)",
+      "Bash(*/.claude/hooks/lib/green-guard.sh*)",
+      "Bash(*/.claude/hooks/lib/review-input.sh*)",
+      "Bash(*/.claude/hooks/lib/dep-audit/dep-audit.sh*)",
+      "Bash(*/skills/judge/judge-input.sh*)",
+      "mcp__stories__log_loop_event",
+      "mcp__stories__log_env_issue"
     ]
-  },
-  "statusLine": {
-    "type": "command",
-    "command": "sh -c 'p=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}/.claude/statusline.sh\"; [ -x \"$p\" ] || p=\"$HOME/.claude/statusline/claude-agents-statusline.sh\"; exec \"$p\"' 2>/dev/null",
-    "padding": 0,
-    "refreshInterval": 60
   }
 }
