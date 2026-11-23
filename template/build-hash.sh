@@ -44,6 +44,7 @@ BUILD_INPUTS=(
     "$TEMPLATE_DIR/init-firewall.sh"
     "$TEMPLATE_DIR/init-firewall-lists.sh"
     "$TEMPLATE_DIR/ca-plugin.sh"
+    "$TEMPLATE_DIR/wl-paste.sh"
     "$TEMPLATE_DIR/domains-base.conf"
     "$TEMPLATE_DIR/devcontainer.json"
     "$TEMPLATE_DIR/devcontainer-lock.json"

@@ -57,6 +57,10 @@ services:
       # substitutes ${HOME} from the host environment. It is empty on a Windows
       # host, and the scripts then report a missing plugin.
       - ${HOME}/.claude/plugins/cache/codeborne/claude-agents:${HOME}/.claude/plugins/cache/codeborne/claude-agents:ro
+      # The images that aTerm uploads for a paste, read-only. The wl-paste shim
+      # (wl-paste.sh) gives the newest one to Claude Code as the clipboard.
+      # Without aTerm the directory stays empty.
+      - ${HOME}/.cache/aterm:/aterm-paste:ro
       # The host Docker socket is not mounted here. With --docker on, the
       # docker-outside-of-docker feature in devcontainer.json mounts it at
       # /var/run/docker-host.sock, and the feature's entrypoint proxies it to

@@ -50,8 +50,10 @@
   // hour, in the background. Without a token it does nothing. It exits 0.
   "postStartCommand": "mkdir -p -m 700 \"$CODEX_HOME\" && sudo /usr/local/bin/init-firewall.sh && .devcontainer/.template/fw-watch.sh --start && .devcontainer/.template/node-modules.sh install && .devcontainer/.template/ca-plugin.sh loop-start && .devcontainer/.template/ca-plugin.sh version-watch",
   // Runs on the HOST, before the mount. A missing source makes a bind mount
-  // fail, and the container does not start.
-  "initializeCommand": "mkdir -p ${localEnv:HOME}/.claude/plugins/cache/codeborne/claude-agents",
+  // fail, and the container does not start. The aTerm paste directory is made
+  // here too, so it belongs to the user and not to root. Owner-only, because
+  // the pastes are screenshots.
+  "initializeCommand": "mkdir -p ${localEnv:HOME}/.claude/plugins/cache/codeborne/claude-agents && mkdir -p -m 700 ${localEnv:HOME}/.cache/aterm",
   // The claude feature writes its own claude() into ~/.zshrc after the image
   // build, so the Dockerfile cannot override it. Append ours after it, once per
   // container creation.

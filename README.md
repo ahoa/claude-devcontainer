@@ -210,6 +210,15 @@ name. `start.sh` removes that container on the next run and builds the new one,
 so the live tmux session goes with it once. The old image stays behind. Remove it
 with `docker image rm <name>-devcontainer`.
 
+### Image paste from aTerm
+
+The container has no clipboard, so Ctrl+V cannot paste an image into Claude.
+The aTerm terminal app uploads the image to `~/.cache/aterm/paste-<id>.jpg` on
+the host and then sends Ctrl+V. The container mounts `~/.cache/aterm` read-only
+at `/aterm-paste`. A `wl-paste` shim in the image gives the newest image from
+there to Claude. The shim uses only an image from the last minute, so a later
+Ctrl+V does not paste an old image. Without aTerm the directory stays empty.
+
 ## Loop
 
 `ca-loop`, a script of the ca plugin, runs the night loop: one story per tick,
@@ -608,3 +617,10 @@ Install with `--docker off` and mount the real path in
   installed with `--docker off` — the Docker socket, which is the host itself.
   Close it to the LAN except for SSH, and give each project on it its own login
   volume (`--login project`) so one unattended run cannot read the rest.
+- **Every container can read every aTerm paste.** The `~/.cache/aterm` mount
+  is the same in every project, also with `--login project`. The shim uses
+  only the last minute, but an agent can read the whole directory. aTerm keeps
+  old pastes there, and a screenshot can show a secret. Delete old pastes on
+  the host with `find ~/.cache/aterm -name 'paste-*' -mmin +1 -delete`. The
+  template makes the directory owner-only, so other users on the host cannot
+  read it.

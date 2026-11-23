@@ -52,6 +52,10 @@ __SUDO_CLEANUP__
 COPY .template/ca-plugin.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/ca-plugin.sh
 
+# The clipboard for image pastes from aTerm, see wl-paste.sh.
+COPY .template/wl-paste.sh /usr/local/bin/wl-paste
+RUN chmod 755 /usr/local/bin/wl-paste
+
 # The git credential for the private repo of the ca plugin, see ca-plugin.sh.
 # It applies to that one repo URL only, so it does not compete with a token that
 # the project gives git for its own repo. The token is a compose secret file, not

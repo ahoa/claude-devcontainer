@@ -56,6 +56,7 @@ HIDDEN_FILES=(
     ca-claude.zsh
     build-hash.sh
     node-modules.sh
+    wl-paste.sh
     # The shared base image, which every project from one template version
     # builds identically (start.sh).
     base/Dockerfile
