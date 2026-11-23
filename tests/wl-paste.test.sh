@@ -51,6 +51,9 @@ echo second > "$ATERM_PASTE_DIR/paste-second.jpg"
 expect "a recent paste lists image/jpeg" 0 "image/jpeg" --list-types
 expect "--type writes the newest paste" 0 "second" --type image/jpeg
 expect "--type writes the paste for any type" 0 "second" --type image/png
+expect "-l lists image/jpeg" 0 "image/jpeg" -l
+expect "-t writes the newest paste" 0 "second" -t image/png
+expect "--type=<type> writes the newest paste" 0 "second" --type=image/png
 expect "a text read exits 1" 1 "" --no-newline
 expect "no argument exits 1" 1 ""
 

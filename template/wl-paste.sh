@@ -8,15 +8,18 @@
 # the host and sends Ctrl+V. docker-compose.yml mounts that directory read-only
 # at /aterm-paste.
 #
-# Claude Code on Linux reads an image with `wl-paste --list-types` and
-# `wl-paste --type <type>`. It tries xclip first, and the image has no xclip.
-# It needs no WAYLAND_DISPLAY: that variable only puts wl-paste before xclip.
+# Claude Code on Linux lists the clipboard types and then reads one type. It
+# tries xclip first, and the image has no xclip. It needs no WAYLAND_DISPLAY:
+# that variable only puts wl-paste before xclip. Claude Code versions differ in
+# the options: one calls `--list-types`, another calls `-l`. Claude Code can
+# also ask for image/png when the list says image/jpeg. So the shim accepts
+# every form of both options and gives the JPEG file for any type.
 #
 # Only a paste from the last minute counts, so a later Ctrl+V does not paste an
 # old image. Every other call, for example a text read, exits 1.
 #
-#   wl-paste --list-types     print image/jpeg when a recent paste exists
-#   wl-paste --type <type>    write the newest recent paste to stdout
+#   wl-paste -l | --list-types                     print image/jpeg
+#   wl-paste -t | --type <type>, --type=<type>     write the newest paste
 
 DIR="${ATERM_PASTE_DIR:-/aterm-paste}"
 
@@ -26,7 +29,7 @@ newest=$(find "$DIR" -maxdepth 1 -type f -name 'paste-*.jpg' -mmin -1 \
 [ -n "$newest" ] || exit 1
 
 case "$1" in
-  --list-types) echo image/jpeg ;;
-  --type) cat "$newest" ;;
+  -l | --list-types) echo image/jpeg ;;
+  -t | --type | --type=*) cat "$newest" ;;
   *) exit 1 ;;
 esac
